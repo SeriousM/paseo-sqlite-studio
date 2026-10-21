@@ -231,6 +231,7 @@ export function useUpdateRow() {
       object: string;
       key: KeyValue[];
       changes: ColumnAssignment[];
+      expected?: ColumnAssignment[];
     }) => update(input),
   });
 }
@@ -238,6 +239,11 @@ export function useUpdateRow() {
 export function useDeleteRow() {
   const remove = useRpc(deleteRow);
   return useMutation({
-    mutationFn: (input: { handleId: string; object: string; key: KeyValue[] }) => remove(input),
+    mutationFn: (input: {
+      handleId: string;
+      object: string;
+      key: KeyValue[];
+      expected?: ColumnAssignment[];
+    }) => remove(input),
   });
 }

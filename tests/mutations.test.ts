@@ -9,7 +9,7 @@ import { deleteRowIn, insertRowIn, readRowsOf, setWriting, updateRowIn } from ".
 const directories: string[] = [];
 const engines: SqliteEngine[] = [];
 
-function fixture(): { engine: SqliteEngine; handleId: string; path: string } {
+async function fixture(): Promise<{ engine: SqliteEngine; handleId: string; path: string }> {
   const directory = mkdtempSync(join(tmpdir(), "paseo-sqlite-write-"));
   directories.push(directory);
   const path = join(directory, "editable.db");
@@ -29,7 +29,7 @@ function fixture(): { engine: SqliteEngine; handleId: string; path: string } {
 
   const engine = new SqliteEngine();
   engines.push(engine);
-  const opened = engine.open(path);
+  const opened = await engine.open(path);
   if (!opened.ok) throw new Error("fixture database did not open");
   return { engine, handleId: opened.entry.handleId, path };
 }
@@ -53,8 +53,8 @@ afterEach(() => {
 });
 
 describe("write mode", () => {
-  it("starts read-only and refuses mutations until editing is enabled", () => {
-    const { engine, handleId } = fixture();
+  it("starts read-only and refuses mutations until editing is enabled", async () => {
+    const { engine, handleId } = await fixture();
     expect(() => insertRowIn(engine, { handleId, object: "people", values: [{ column: "name", value: "alan" }] })).toThrow(
       /editing is off/i,
     );
@@ -62,9 +62,9 @@ describe("write mode", () => {
     expect(setWriting(engine, { handleId, enabled: false })).toEqual({ readOnly: true, warning: null });
   });
 
-  it("refuses writes on a snapshot handle", () => {
-    const { engine, path } = fixture();
-    const snapshot = engine.open(path, "snapshot");
+  it("refuses writes on a snapshot handle", async () => {
+    const { engine, path } = await fixture();
+    const snapshot = await engine.open(path, "snapshot");
     expect(snapshot.ok).toBe(true);
     if (!snapshot.ok) return;
     const outcome = setWriting(engine, { handleId: snapshot.entry.handleId, enabled: true });
@@ -72,8 +72,8 @@ describe("write mode", () => {
     expect(outcome.warning).toMatch(/snapshot/i);
   });
 
-  it("inserts a row and returns its key", () => {
-    const { engine, handleId, path } = fixture();
+  it("inserts a row and returns its key", async () => {
+    const { engine, handleId, path } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     const result = insertRowIn(engine, {
       handleId,
@@ -89,8 +89,8 @@ describe("write mode", () => {
     expect(readPeople(path)).toHaveLength(3);
   });
 
-  it("updates and deletes by key", () => {
-    const { engine, handleId, path } = fixture();
+  it("updates and deletes by key", async () => {
+    const { engine, handleId, path } = await fixture();
     setWriting(engine, { handleId, enabled: true });
 
     expect(updateRowIn(engine, { handleId, object: "people", key: [1], changes: [{ column: "age", value: 37 }] })).toEqual({
@@ -102,8 +102,8 @@ describe("write mode", () => {
     expect(readPeople(path).map((row) => row.id)).toEqual([1]);
   });
 
-  it("reports a missing row instead of silently doing nothing", () => {
-    const { engine, handleId } = fixture();
+  it("reports a missing row instead of silently doing nothing", async () => {
+    const { engine, handleId } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     expect(() => updateRowIn(engine, { handleId, object: "people", key: [99], changes: [{ column: "age", value: 1 }] })).toThrow(
       /no row matched/i,
@@ -111,8 +111,8 @@ describe("write mode", () => {
     expect(() => deleteRowIn(engine, { handleId, object: "people", key: [99] })).toThrow(/no row matched/i);
   });
 
-  it("keeps constraints enforced and rolls back a failed insert", () => {
-    const { engine, handleId, path } = fixture();
+  it("keeps constraints enforced and rolls back a failed insert", async () => {
+    const { engine, handleId, path } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     expect(() =>
       insertRowIn(engine, {
@@ -127,26 +127,76 @@ describe("write mode", () => {
     expect(readPeople(path)).toHaveLength(2);
   });
 
-  it("refuses unknown and generated columns", () => {
-    const { engine, handleId } = fixture();
+  it("refuses to overwrite a row that changed since it was loaded", async () => {
+    const { engine, handleId, path } = await fixture();
+    setWriting(engine, { handleId, enabled: true });
+
+    const other = new DatabaseSync(path);
+    other.exec("update people set age = 99 where id = 1");
+    other.close();
+
+    expect(() =>
+      updateRowIn(engine, {
+        handleId,
+        object: "people",
+        key: [1],
+        changes: [{ column: "age", value: 37 }],
+        expected: [{ column: "age", value: 36 }],
+      }),
+    ).toThrow(/changed since/i);
+
+    // With the current value as the expectation the write goes through.
+    expect(
+      updateRowIn(engine, {
+        handleId,
+        object: "people",
+        key: [1],
+        changes: [{ column: "age", value: 37 }],
+        expected: [{ column: "age", value: 99 }],
+      }),
+    ).toEqual({ changes: 1 });
+    expect(readPeople(path).find((row) => row.id === 1)?.age).toBe(37);
+  });
+
+  it("refuses to delete a row that changed since it was loaded", async () => {
+    const { engine, handleId, path } = await fixture();
+    setWriting(engine, { handleId, enabled: true });
+
+    const other = new DatabaseSync(path);
+    other.exec("update people set name = 'ada l' where id = 1");
+    other.close();
+
+    expect(() =>
+      deleteRowIn(engine, {
+        handleId,
+        object: "people",
+        key: [1],
+        expected: [{ column: "name", value: "ada" }],
+      }),
+    ).toThrow(/changed since/i);
+    expect(readPeople(path)).toHaveLength(2);
+  });
+
+  it("refuses unknown and generated columns", async () => {
+    const { engine, handleId } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     expect(() =>
       insertRowIn(engine, { handleId, object: "people", values: [{ column: "nope", value: "x" }] }),
     ).toThrow(/unknown column/i);
   });
 
-  it("serves reads again after switching back to read-only", () => {
-    const { engine, handleId, path } = fixture();
+  it("serves reads again after switching back to read-only", async () => {
+    const { engine, handleId, path } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     insertRowIn(engine, { handleId, object: "people", values: [{ column: "name", value: "alan" }] });
     setWriting(engine, { handleId, enabled: false });
-    const rows = readRowsOf(engine, { handleId, object: "people", limit: 10, countExact: true });
+    const rows = await readRowsOf(engine, { handleId, object: "people", limit: 10, countExact: true });
     expect(rows.rowCount).toBe(3);
     expect(readPeople(path)).toHaveLength(3);
   });
 
-  it("writes NULL and empty string as distinct values", () => {
-    const { engine, handleId, path } = fixture();
+  it("writes NULL and empty string as distinct values", async () => {
+    const { engine, handleId, path } = await fixture();
     setWriting(engine, { handleId, enabled: true });
     updateRowIn(engine, { handleId, object: "people", key: [1], changes: [{ column: "age", value: null }] });
     const row = readPeople(path).find((entry) => entry.id === 1);

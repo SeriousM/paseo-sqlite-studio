@@ -8,7 +8,8 @@ type JobRequest = z.infer<typeof jobStartInputSchema>;
 import type { keyValueSchema } from "../shared/contracts";
 import { classifySqliteError, readDatabaseInfo, type SqliteEngine } from "./engine";
 import type { JobRegistry } from "./jobs";
-import { runRowQuery, type RowQuerySpec } from "./rows";
+import { assembleRowQuery, buildCountQuery, buildRowQuery, type RowQuerySpec } from "./rows";
+import { runQueriesInWorker } from "./sql-worker";
 import {
   describeColumns,
   hasRowId,
@@ -28,6 +29,10 @@ type ColumnAssignment = z.infer<typeof columnAssignmentSchema>;
 
 const DEFAULT_DATABASE_EXTENSIONS = ["db", "sqlite", "sqlite3", "db3", "s3db", "gpkg", "sqlite2"];
 const MAX_DIRECTORY_ENTRIES = 1000;
+/** A single grid page may scan this long before it reports a partial result. */
+const ROW_BUDGET_MS = 5000;
+/** Hard ceiling for a grid page, so a runaway sort cannot spin forever. */
+const ROW_CEILING_MS = 20_000;
 const MAX_CELL_TEXT_BYTES = 4 * 1024 * 1024;
 const MAX_CELL_BLOB_BYTES = 8 * 1024 * 1024;
 
@@ -85,8 +90,8 @@ export function listPath(input: { path: string; extensions?: readonly string[] |
   return { path: target, parentPath: parent === target ? null : parent, entries, truncated };
 }
 
-export function openPath(engine: SqliteEngine, input: { path: string; mode?: "direct" | "snapshot" | undefined }) {
-  const outcome = engine.open(input.path, input.mode ?? "direct");
+export async function openPath(engine: SqliteEngine, input: { path: string; mode?: "direct" | "snapshot" | undefined }) {
+  const outcome = await engine.open(input.path, input.mode ?? "direct");
   if (!outcome.ok) return { ok: false as const, error: outcome.error };
   const entry = outcome.entry;
   return {
@@ -136,9 +141,58 @@ export function readObjectOf(engine: SqliteEngine, input: { handleId: string; na
   });
 }
 
-export function readRowsOf(engine: SqliteEngine, input: RowQuerySpec & { handleId: string }) {
+/**
+ * Reads a page outside the plugin thread. Building the statement needs only pragma
+ * lookups, so it stays here; the scan, the sort, and the count run in the worker.
+ */
+export async function readRowsOf(engine: SqliteEngine, input: RowQuerySpec & { handleId: string }) {
   const { handleId, ...spec } = input;
-  return withDatabase(engine, handleId, (db) => runRowQuery(db, spec));
+  const entry = engine.get(handleId);
+  const query = buildRowQuery(entry.db, { ...spec, limit: spec.limit + 1 });
+  const queries = [
+    {
+      id: "page",
+      sql: query.sql,
+      params: query.params,
+      limit: null,
+      rowColumns: query.displayNames,
+      keyColumns: query.identity?.readColumns ?? [],
+      budgetMs: ROW_BUDGET_MS,
+    },
+  ];
+  if (spec.countExact === true) {
+    const count = buildCountQuery(entry.db, spec);
+    queries.push({
+      id: "count",
+      sql: count.sql,
+      params: count.params,
+      limit: null,
+      rowColumns: ["c"],
+      keyColumns: [],
+      budgetMs: ROW_BUDGET_MS,
+    });
+  }
+
+  const run = runQueriesInWorker({ path: entry.snapshotPath ?? entry.path, queries, ceilingMs: ROW_CEILING_MS });
+  let results;
+  try {
+    results = await run.result;
+  } catch (error) {
+    throw readableError(error);
+  }
+  const page = results.page;
+  if (!page) throw new Error("The query returned no result.");
+  return assembleRowQuery(query, page, countFromCell(results.count?.rows?.[0]?.[0]), spec.limit);
+}
+
+/** A count arrives as an encoded cell so it survives the driver's BigInt mode. */
+function countFromCell(cell: unknown): number | null {
+  if (typeof cell === "number") return cell;
+  if (typeof cell === "object" && cell !== null && "kind" in cell) {
+    const tagged = cell as { kind: string; value?: string };
+    if (tagged.kind === "bigint" && typeof tagged.value === "string") return Number(tagged.value);
+  }
+  return null;
 }
 
 export function readCellOf(
@@ -218,7 +272,13 @@ export function insertRowIn(
 
 export function updateRowIn(
   engine: SqliteEngine,
-  input: { handleId: string; object: string; key: readonly KeyValue[]; changes: readonly ColumnAssignment[] },
+  input: {
+    handleId: string;
+    object: string;
+    key: readonly KeyValue[];
+    changes: readonly ColumnAssignment[];
+    expected?: readonly ColumnAssignment[] | null;
+  },
 ) {
   const entry = requireWritable(engine, input.handleId);
   try {
@@ -230,7 +290,7 @@ export function updateRowIn(
 
 export function deleteRowIn(
   engine: SqliteEngine,
-  input: { handleId: string; object: string; key: readonly KeyValue[] },
+  input: { handleId: string; object: string; key: readonly KeyValue[]; expected?: readonly ColumnAssignment[] | null },
 ) {
   const entry = requireWritable(engine, input.handleId);
   try {

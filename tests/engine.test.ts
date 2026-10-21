@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe("probeFile", () => {
-  it("recognizes a SQLite database by its header", () => {
+  it("recognizes a SQLite database by its header", async () => {
     const path = join(scratchDirectory(), "app.db");
     createDatabase(path, "create table t(a integer primary key, b text)");
     const probe = probeFile(path);
@@ -62,13 +62,13 @@ describe("probeFile", () => {
     expect(probe.sizeBytes).toBeGreaterThan(0);
   });
 
-  it("reports a text file as not a database", () => {
+  it("reports a text file as not a database", async () => {
     const path = join(scratchDirectory(), "notes.txt");
     writeFileSync(path, "hello, this is not a database");
     expect(probeFile(path).isSqlite).toBe(false);
   });
 
-  it("reports a missing file", () => {
+  it("reports a missing file", async () => {
     const probe = probeFile(join(scratchDirectory(), "absent.db"));
     expect(probe.exists).toBe(false);
     expect(probe.isSqlite).toBe(false);
@@ -76,11 +76,11 @@ describe("probeFile", () => {
 });
 
 describe("SqliteEngine.open", () => {
-  it("opens a database read-only and rejects writes", () => {
+  it("opens a database read-only and rejects writes", async () => {
     const path = join(scratchDirectory(), "app.db");
     createDatabase(path, "create table t(a integer primary key, b text); insert into t(b) values ('x')");
     const engine = createEngine();
-    const outcome = engine.open(path);
+    const outcome = await engine.open(path);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     const rows = outcome.entry.db.prepare("select b from t").all();
@@ -90,11 +90,11 @@ describe("SqliteEngine.open", () => {
     engine.dispose();
   });
 
-  it("refuses a file that is not a SQLite database", () => {
+  it("refuses a file that is not a SQLite database", async () => {
     const path = join(scratchDirectory(), "fake.db");
     writeFileSync(path, "definitely not sqlite");
     const engine = createEngine();
-    const outcome = engine.open(path);
+    const outcome = await engine.open(path);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("not-a-database");
@@ -102,23 +102,23 @@ describe("SqliteEngine.open", () => {
     engine.dispose();
   });
 
-  it("refuses a directory", () => {
+  it("refuses a directory", async () => {
     const engine = createEngine();
-    const outcome = engine.open(scratchDirectory());
+    const outcome = await engine.open(scratchDirectory());
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("permission");
     engine.dispose();
   });
 
-  it("falls back to a snapshot while another connection holds an exclusive lock", () => {
+  it("falls back to a snapshot while another connection holds an exclusive lock", async () => {
     const path = join(scratchDirectory(), "locked.db");
     createDatabase(path, "create table t(a integer primary key, b text); insert into t values (1, 'x')");
     const engine = createEngine();
     const holder = holdExclusiveLock(path);
 
     try {
-      const outcome = engine.open(path);
+      const outcome = await engine.open(path);
       expect(outcome.ok).toBe(true);
       if (!outcome.ok) return;
       expect(outcome.entry.snapshotPath).not.toBeNull();
@@ -135,17 +135,17 @@ describe("SqliteEngine.open", () => {
     }
 
     // After the lock is released the same file opens directly again.
-    const after = engine.open(path);
+    const after = await engine.open(path);
     expect(after.ok).toBe(true);
     if (after.ok) expect(after.entry.snapshotPath).toBeNull();
     engine.dispose();
   });
 
-  it("opens a snapshot copy on request even without a lock", () => {
+  it("opens a snapshot copy on request even without a lock", async () => {
     const path = join(scratchDirectory(), "wal.db");
     createDatabase(path, "pragma journal_mode = wal; create table t(a integer primary key, b text); insert into t values (1, 'x')");
     const engine = createEngine();
-    const outcome = engine.open(path, "snapshot");
+    const outcome = await engine.open(path, "snapshot");
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.entry.snapshotPath).not.toBeNull();
@@ -154,11 +154,11 @@ describe("SqliteEngine.open", () => {
     engine.dispose();
   });
 
-  it("closes a handle and forgets it", () => {
+  it("closes a handle and forgets it", async () => {
     const path = join(scratchDirectory(), "app.db");
     createDatabase(path, "create table t(a integer)");
     const engine = createEngine();
-    const outcome = engine.open(path);
+    const outcome = await engine.open(path);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     const { handleId } = outcome.entry;
@@ -168,11 +168,27 @@ describe("SqliteEngine.open", () => {
     engine.dispose();
   });
 
-  it("deletes the snapshot file when the handle closes", () => {
+  it("shares one snapshot between handles and deletes it after the last close", async () => {
+    const path = join(scratchDirectory(), "shared.db");
+    createDatabase(path, "pragma journal_mode = wal; create table t(a integer primary key); insert into t values (1)");
+    const engine = createEngine();
+    const first = await engine.open(path, "snapshot");
+    const second = await engine.open(path, "snapshot");
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.entry.snapshotPath).toBe(second.entry.snapshotPath);
+    const snapshotPath = first.entry.snapshotPath ?? "";
+    engine.close(first.entry.handleId);
+    expect(probeFile(snapshotPath).exists).toBe(true);
+    engine.close(second.entry.handleId);
+    expect(probeFile(snapshotPath).exists).toBe(false);
+  });
+
+  it("deletes the snapshot file when the handle closes", async () => {
     const path = join(scratchDirectory(), "wal.db");
     createDatabase(path, "pragma journal_mode = wal; create table t(a integer)");
     const engine = createEngine();
-    const outcome = engine.open(path, "snapshot");
+    const outcome = await engine.open(path, "snapshot");
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     const { snapshotPath, handleId } = outcome.entry;

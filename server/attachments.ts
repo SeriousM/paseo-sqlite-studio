@@ -1,9 +1,10 @@
 import { pathToFileURL } from "node:url";
 import type { z } from "zod";
+import type { Cell } from "../shared/contracts";
 import type { searchSqliteObjects } from "../shared/attachment";
 import type { RpcOutput } from "@getpaseo/plugin";
 import { describeColumns, listForeignKeys, listIndexes, listObjects } from "./schema";
-import { runRowQuery } from "./rows";
+import { readRowsOf } from "./handlers";
 import type { SqliteEngine } from "./engine";
 
 type AttachmentItem = RpcOutput<typeof searchSqliteObjects>["items"][number];
@@ -21,7 +22,7 @@ function markdownTable(columns: readonly string[], rows: readonly (readonly stri
   return [header, divider, ...body].join("\n");
 }
 
-function describeObject(engine: SqliteEngine, handleId: string, name: string): string | null {
+async function describeObject(engine: SqliteEngine, handleId: string, name: string): Promise<string | null> {
   const entry = engine.get(handleId);
   const db = entry.db;
   const kind = listObjects(db).find((object) => object.name === name);
@@ -70,7 +71,12 @@ function describeObject(engine: SqliteEngine, handleId: string, name: string): s
 
   if (columns.length > 0) {
     try {
-      const sample = runRowQuery(db, { object: name, limit: SAMPLE_ROWS, columns: columns.map((column) => column.name) });
+      const sample = await readRowsOf(engine, {
+        handleId,
+        object: name,
+        limit: SAMPLE_ROWS,
+        columns: columns.map((column: { name: string }) => column.name),
+      });
       if (sample.rows.length > 0) {
         lines.push(
           "",
@@ -99,18 +105,18 @@ function describeObject(engine: SqliteEngine, handleId: string, name: string): s
   return text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}\n…` : text;
 }
 
-export function searchAttachments(
+export async function searchAttachments(
   engine: SqliteEngine,
   recentPaths: readonly string[],
   query: string,
-): { items: AttachmentItem[] } {
+): Promise<{ items: AttachmentItem[] }> {
   const needle = query.trim().toLowerCase();
   const items: AttachmentItem[] = [];
   const opened: string[] = [];
 
   try {
     for (const path of recentPaths.slice(0, MAX_DATABASES)) {
-      const outcome = engine.open(path);
+      const outcome = await engine.open(path);
       if (!outcome.ok) continue;
       const handleId = outcome.entry.handleId;
       opened.push(handleId);
@@ -122,7 +128,7 @@ export function searchAttachments(
         (object) => needle.length === 0 || object.name.toLowerCase().includes(needle),
       );
       for (const match of matches.slice(0, MAX_ITEMS - items.length)) {
-        const text = describeObject(engine, handleId, match.name);
+        const text = await describeObject(engine, handleId, match.name);
         if (!text) continue;
         const fileName = path.split(/[\\/]/).pop() ?? path;
         items.push({

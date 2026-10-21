@@ -46,9 +46,9 @@ afterEach(() => {
 });
 
 describe("attachment search", () => {
-  it("describes a matching table with schema, keys, and sample rows", () => {
+  it("describes a matching table with schema, keys, and sample rows", async () => {
     const { engine, path } = fixture();
-    const { items } = searchAttachments(engine, [path], "orders");
+    const { items } = await searchAttachments(engine, [path], "orders");
     expect(items).toHaveLength(1);
     const item = items[0];
     expect(item?.title).toBe("orders");
@@ -64,42 +64,42 @@ describe("attachment search", () => {
     expect(item?.text).toContain("2026-01-02");
   });
 
-  it("matches views too", () => {
+  it("matches views too", async () => {
     const { engine, path } = fixture();
-    const { items } = searchAttachments(engine, [path], "order_totals");
+    const { items } = await searchAttachments(engine, [path], "order_totals");
     expect(items[0]?.text).toContain("### order_totals (view)");
   });
 
-  it("returns objects for an empty query and caps the list", () => {
+  it("returns objects for an empty query and caps the list", async () => {
     const { engine, path } = fixture();
-    const { items } = searchAttachments(engine, [path], "");
+    const { items } = await searchAttachments(engine, [path], "");
     expect(items.length).toBeGreaterThanOrEqual(3);
     expect(items.length).toBeLessThanOrEqual(8);
   });
 
-  it("skips unreadable or missing recent paths without failing", () => {
+  it("skips unreadable or missing recent paths without failing", async () => {
     const { engine, path } = fixture();
     const missing = join(path, "..", "gone.db");
-    const { items } = searchAttachments(engine, [missing, path], "customers");
+    const { items } = await searchAttachments(engine, [missing, path], "customers");
     expect(items).toHaveLength(1);
     expect(items[0]?.title).toBe("customers");
   });
 
-  it("ignores a file that is not a database", () => {
+  it("ignores a file that is not a database", async () => {
     const { engine, path } = fixture();
     const fake = join(path, "..", "fake.db");
     writeFileSync(fake, "not sqlite at all");
-    const { items } = searchAttachments(engine, [fake], "");
+    const { items } = await searchAttachments(engine, [fake], "");
     expect(items).toHaveLength(0);
   });
 
-  it("leaves no handles open behind it", () => {
+  it("leaves no handles open behind it", async () => {
     const { engine, path } = fixture();
-    searchAttachments(engine, [path], "orders");
+    await searchAttachments(engine, [path], "orders");
     expect(engine.list()).toHaveLength(0);
   });
 
-  it("keeps a snapshot of a wide table inside the prompt budget", () => {
+  it("keeps a snapshot of a wide table inside the prompt budget", async () => {
     const directory = mkdtempSync(join(tmpdir(), "paseo-sqlite-attach-wide-"));
     directories.push(directory);
     const path = join(directory, "wide.db");
@@ -111,7 +111,7 @@ describe("attachment search", () => {
 
     const engine = new SqliteEngine();
     engines.push(engine);
-    const { items } = searchAttachments(engine, [path], "wide");
+    const { items } = await searchAttachments(engine, [path], "wide");
     expect(items[0]?.text.length).toBeLessThanOrEqual(4100);
   });
 });

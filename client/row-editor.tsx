@@ -48,6 +48,26 @@ function initialFieldState(cell: Cell): FieldState {
   return { text: cell.previewHex, isNull: false };
 }
 
+/**
+ * The row as the user saw it. Sent with a write so the daemon can refuse to
+ * overwrite a row that changed elsewhere. Clipped cells (long text, blobs) are
+ * skipped, because their preview cannot be compared with the stored value.
+ */
+function buildExpected(fields: WritableField[], initialValues: Cell[] | null): ColumnAssignment[] {
+  if (initialValues === null) return [];
+  const expected: ColumnAssignment[] = [];
+  for (const { column, index } of fields) {
+    const cell = initialValues[index];
+    if (cell === undefined) continue;
+    if (cell === null || typeof cell === "string" || typeof cell === "number") {
+      expected.push({ column: column.name, value: cell });
+      continue;
+    }
+    if (cell.kind === "bigint") expected.push({ column: column.name, value: cell });
+  }
+  return expected.slice(0, 64);
+}
+
 function buildFieldStates(fields: WritableField[], initialValues: Cell[] | null): Record<string, FieldState> {
   const states: Record<string, FieldState> = {};
   for (const { column, index } of fields) {
@@ -118,6 +138,7 @@ export function RowEditor({
     [columns],
   );
   const initialStates = useMemo(() => buildFieldStates(fields, initialValues), [fields, initialValues]);
+  const expected = useMemo(() => buildExpected(fields, initialValues), [fields, initialValues]);
   const signature = useMemo(
     () => `${mode}:${object}:${JSON.stringify(initialStates)}`,
     [mode, object, initialStates],
@@ -176,7 +197,7 @@ export function RowEditor({
     }
     if (rowKey === null) return;
     updateRow.mutate(
-      { handleId, object, key: rowKey, changes: assignments },
+      { handleId, object, key: rowKey, changes: assignments, expected },
       {
         onSuccess: () => {
           onSaved();
@@ -193,7 +214,7 @@ export function RowEditor({
     }
     if (rowKey === null) return;
     removeRow.mutate(
-      { handleId, object, key: rowKey },
+      { handleId, object, key: rowKey, expected },
       {
         onSuccess: () => {
           onSaved();

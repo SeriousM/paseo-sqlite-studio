@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { encodingPrologue } from "../shared/cell-encoding";
 import type { jobResultSchema, jobStartInputSchema, jobStateSchema } from "../shared/contracts";
 import { classifySqliteError, type DatabaseEntry, type SqliteEngine } from "./engine";
+import { runQueriesInWorker, type WorkerRun } from "./sql-worker";
 import { writeExport } from "./export";
 
 type JobResult = z.infer<typeof jobResultSchema>;
@@ -30,91 +31,9 @@ const RETAINED_JOBS = 20;
 /** Rows a worker may accumulate before it reports a partial result. */
 const WORKER_TIME_BUDGET_MS = 20_000;
 
-/**
- * The worker runs arbitrary SQL away from the plugin thread: a slow sort or a
- * full scan would otherwise stall every other RPC in this plugin.
- *
- * The cell helpers are embedded from `shared/cell-encoding.ts` by function source,
- * so both sides encode values identically without a second copy of the rules.
- */
-const WORKER_SOURCE = `
-const { parentPort, workerData } = require("node:worker_threads");
-const { DatabaseSync } = require("node:sqlite");
-${encodingPrologue()}
-const startedAt = Date.now();
-try {
-  const db = new DatabaseSync(workerData.path, { readOnly: true, timeout: 750 });
-  const statement = db.prepare(workerData.sql);
-  if (typeof statement.setReadBigInts === "function") statement.setReadBigInts(true);
-  const declared = typeof statement.columns === "function"
-    ? statement.columns().filter((column) => column.name !== null)
-    : [];
-  const returnsRows = declared.length > 0 || /^\\s*(select|with|pragma|explain|values)\\b/i.test(workerData.sql);
-  if (!returnsRows) {
-    const outcome = statement.run();
-    db.close();
-    parentPort.postMessage({
-      ok: true,
-      returnedRows: false,
-      changes: outcome.changes === undefined ? null : Number(outcome.changes),
-      columns: [],
-      rows: [],
-      hasMore: false,
-      budgetExceeded: false,
-      elapsedMs: Date.now() - startedAt,
-    });
-  } else {
-    const rows = [];
-    const keys = [];
-    let names = declared.map((column) => column.name);
-    let hasMore = false;
-    let budgetExceeded = false;
-    for (const row of statement.iterate()) {
-      if (rows.length >= workerData.limit) { hasMore = true; break; }
-      if (names.length === 0) names = Object.keys(row);
-      rows.push(names.map((name) => encodeCell(row[name])));
-      keys.push([]);
-      if (Date.now() - startedAt > workerData.budgetMs) { budgetExceeded = true; hasMore = true; break; }
-    }
-    db.close();
-    parentPort.postMessage({
-      ok: true,
-      returnedRows: true,
-      changes: null,
-      columns: names.map((name) => {
-        const declaredColumn = declared.find((column) => column.name === name);
-        const declaredType = declaredColumn ? (declaredColumn.type || "") : "";
-        return { name, declaredType, affinity: affinityOf(declaredType) };
-      }),
-      rows,
-      keys,
-      hasMore,
-      budgetExceeded,
-      elapsedMs: Date.now() - startedAt,
-    });
-  }
-} catch (error) {
-  parentPort.postMessage({ ok: false, error: error && error.message ? error.message : String(error) });
-}
-`;
-
-interface WorkerReply {
-  ok: boolean;
-  error?: string;
-  returnedRows?: boolean;
-  changes?: number | null;
-  columns?: Array<{ name: string; declaredType: string; affinity: ColumnAffinity }>;
-  /** Encoded by the embedded shared helpers, so these are real cells. */
-  rows?: Cell[][];
-  keys?: KeyValue[][];
-  hasMore?: boolean;
-  budgetExceeded?: boolean;
-  elapsedMs?: number;
-}
-
 interface JobRecord {
   status: JobStatus;
-  worker: Worker | null;
+  worker: WorkerRun | null;
   cancel: () => void;
 }
 
@@ -194,66 +113,56 @@ export class JobRegistry {
   }
 
   async #runSqlJob(record: JobRecord, entry: DatabaseEntry, request: Extract<JobRequest, { kind: "sql" }>): Promise<void> {
-    // A job reads the same file the handle reads; snapshots are read from their copy.
-    const path = entry.snapshotPath ?? entry.path;
-    const worker = new Worker(WORKER_SOURCE, {
-      eval: true,
-      workerData: { path, sql: request.sql, limit: request.limit, budgetMs: WORKER_TIME_BUDGET_MS },
+    const run = runQueriesInWorker({
+      // A job reads the same file the handle reads; snapshots are read from their copy.
+      path: entry.snapshotPath ?? entry.path,
+      queries: [
+        {
+          id: "query",
+          sql: request.sql,
+          params: [],
+          limit: request.limit,
+          rowColumns: [],
+          keyColumns: [],
+          budgetMs: WORKER_TIME_BUDGET_MS,
+        },
+      ],
+      ceilingMs: JOB_TIMEOUT_MS,
     });
-    record.worker = worker;
-
-    const timeout = setTimeout(() => {
-      record.status.error = `The query ran longer than ${Math.round(JOB_TIMEOUT_MS / 60000)} minutes and was cancelled.`;
-      record.cancel();
-    }, JOB_TIMEOUT_MS);
-    timeout.unref();
-
-    let settled = false;
-    const settle = (result: JobResult | null, error: string | null, state: JobState) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      this.#finish(record, result, error, state);
-    };
-
+    record.worker = run;
     record.cancel = () => {
-      void worker.terminate();
-      settle(null, "Cancelled.", "cancelled");
+      run.terminate();
+      this.#finish(record, null, "Cancelled.", "cancelled");
     };
 
-    worker.on("message", (reply: WorkerReply) => {
-      if (!reply.ok) {
-        settle(null, reply.error ?? "The query failed.", "failed");
-        void worker.terminate();
-        return;
-      }
-      settle(
+    try {
+      const result = (await run.result).query;
+      if (!result) throw new Error("The query returned no result.");
+      this.#finish(
+        record,
         {
           kind: "sql",
-          budgetExceeded: reply.budgetExceeded === true,
-          changes: reply.changes ?? null,
+          budgetExceeded: result.budgetExceeded,
+          changes: result.changes,
           result: {
-            columns: reply.columns ?? [],
-            rows: reply.rows ?? [],
-            keys: reply.keys ?? [],
-            hasMore: reply.hasMore === true,
+            columns: result.columns,
+            rows: result.rows,
+            keys: result.keys,
+            hasMore: result.hasMore,
             rowCount: null,
             nextCursor: null,
-            elapsedMs: reply.elapsedMs ?? 0,
+            elapsedMs: result.elapsedMs,
             sql: request.sql,
           },
         },
         null,
         "done",
       );
-      void worker.terminate();
-    });
-    worker.on("error", (error) => {
-      settle(null, classifySqliteError(error).message, "failed");
-    });
-    worker.on("exit", (code) => {
-      if (!settled) settle(null, code === 0 ? "The query stopped without returning a result." : `The query worker exited with code ${code}.`, "failed");
-    });
+    } catch (error) {
+      if (record.status.state === "cancelled") return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.#finish(record, null, classifySqliteError(error).message || message, "failed");
+    }
   }
 
   async #runExportJob(

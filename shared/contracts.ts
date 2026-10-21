@@ -298,13 +298,23 @@ export const updateRow = defineRpc({
     object: z.string(),
     key: z.array(keyValueSchema),
     changes: z.array(columnAssignmentSchema).min(1),
+    /**
+     * The values the user was looking at. They become part of the WHERE clause, so a
+     * row that changed in another process is reported instead of overwritten.
+     */
+    expected: z.array(columnAssignmentSchema).max(64).nullish(),
   }),
   output: z.object({ changes: z.number() }),
 });
 
 export const deleteRow = defineRpc({
   name: "sqlite.row.delete",
-  input: z.object({ handleId: z.string(), object: z.string(), key: z.array(keyValueSchema) }),
+  input: z.object({
+    handleId: z.string(),
+    object: z.string(),
+    key: z.array(keyValueSchema),
+    expected: z.array(columnAssignmentSchema).max(64).nullish(),
+  }),
   output: z.object({ changes: z.number() }),
 });
 

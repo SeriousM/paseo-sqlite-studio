@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { z } from "zod";
@@ -54,6 +56,8 @@ export interface DatabaseEntry {
   /** Canonical path the user opened; the snapshot path, when present, is a copy of it. */
   path: string;
   snapshotPath: string | null;
+  /** Registry key of the snapshot this handle shares, if any. */
+  snapshotKey: string | null;
   db: DatabaseSync;
   sizeBytes: number;
   modifiedAt: number;
@@ -195,6 +199,11 @@ export function readDatabaseInfo(db: DatabaseSync): DatabaseInfo {
 
 export class SqliteEngine {
   readonly #entries = new Map<string, DatabaseEntry>();
+  /**
+   * Snapshots are shared: opening the same locked file twice reuses one copy, and
+   * the copy is deleted only when its last handle closes.
+   */
+  readonly #snapshots = new Map<string, { path: string; users: Set<string> }>();
   readonly #sweeper: NodeJS.Timeout;
 
   constructor() {
@@ -202,7 +211,7 @@ export class SqliteEngine {
     this.#sweeper.unref();
   }
 
-  open(path: string, mode: "direct" | "snapshot" = "direct"): OpenOutcome {
+  async open(path: string, mode: "direct" | "snapshot" = "direct"): Promise<OpenOutcome> {
     const absolute = resolve(path);
     const probe = probeFile(absolute);
     if (!probe.exists) {
@@ -228,9 +237,14 @@ export class SqliteEngine {
     }
 
     const warnings: string[] = [];
+    const handleId = createHash("sha256")
+      .update(`${absolute}:${Date.now()}:${Math.random()}`)
+      .digest("hex")
+      .slice(0, 16);
+
     if (mode === "snapshot") {
-      const snapshotPath = this.#createSnapshot(absolute, warnings);
-      if (!snapshotPath) {
+      const snapshot = await this.#acquireSnapshot(absolute, handleId, warnings);
+      if (!snapshot) {
         return {
           ok: false,
           error: {
@@ -240,29 +254,29 @@ export class SqliteEngine {
           },
         };
       }
-      const opened = this.#openSnapshot(snapshotPath, warnings);
+      const opened = this.#openSnapshot(snapshot.path, warnings);
       if (!opened.ok) {
-        this.#deleteSnapshotFiles(snapshotPath);
+        this.#releaseSnapshot(snapshot.key, handleId);
         return opened;
       }
-      return this.#register(opened.db, absolute, snapshotPath, probe, warnings);
+      return this.#register(opened.db, handleId, absolute, snapshot.path, snapshot.key, probe, warnings);
     }
 
     const direct = this.#openDirect(absolute);
-    if (direct.ok) return this.#register(direct.db, absolute, null, probe, warnings);
+    if (direct.ok) return this.#register(direct.db, handleId, absolute, null, null, probe, warnings);
 
     if (direct.error.code !== "locked") return direct;
 
     // Another process holds a write lock: read a copy instead of failing.
-    const snapshotPath = this.#createSnapshot(absolute, warnings);
-    if (!snapshotPath) return direct;
-    const opened = this.#openSnapshot(snapshotPath, warnings);
+    const snapshot = await this.#acquireSnapshot(absolute, handleId, warnings);
+    if (!snapshot) return direct;
+    const opened = this.#openSnapshot(snapshot.path, warnings);
     if (!opened.ok) {
-      this.#deleteSnapshotFiles(snapshotPath);
+      this.#releaseSnapshot(snapshot.key, handleId);
       return direct;
     }
     warnings.push("Another process holds this database. You are reading a snapshot copy of the file.");
-    return this.#register(opened.db, absolute, snapshotPath, probe, warnings);
+    return this.#register(opened.db, handleId, absolute, snapshot.path, snapshot.key, probe, warnings);
   }
 
   /**
@@ -318,7 +332,7 @@ export class SqliteEngine {
     } catch {
       // Closing an already-closed handle is not worth reporting.
     }
-    if (entry.snapshotPath) this.#deleteSnapshotFiles(entry.snapshotPath);
+    if (entry.snapshotKey) this.#releaseSnapshot(entry.snapshotKey, handleId);
     return true;
   }
 
@@ -329,20 +343,19 @@ export class SqliteEngine {
 
   #register(
     db: DatabaseSync,
+    handleId: string,
     path: string,
     snapshotPath: string | null,
+    snapshotKey: string | null,
     probe: FileProbe,
     warnings: string[],
   ): OpenOutcome {
-    const handleId = createHash("sha256")
-      .update(`${path}:${Date.now()}:${Math.random()}`)
-      .digest("hex")
-      .slice(0, 16);
     const entry: DatabaseEntry = {
       handleId,
       readOnly: true,
       path,
       snapshotPath,
+      snapshotKey,
       db,
       sizeBytes: probe.sizeBytes,
       modifiedAt: probe.modifiedAt,
@@ -400,27 +413,54 @@ export class SqliteEngine {
     return { ok: false, error: lastError };
   }
 
-  #createSnapshot(path: string, warnings: string[]): string | null {
+  /**
+   * Streams the copy instead of blocking on one syscall, so a multi-gigabyte file
+   * does not freeze the plugin, and reuses a copy that is already open.
+   */
+  async #acquireSnapshot(
+    path: string,
+    handleId: string,
+    warnings: string[],
+  ): Promise<{ path: string; key: string } | null> {
     try {
       mkdirSync(SNAPSHOT_DIR, { recursive: true });
       const stats = statSync(path);
       const digest = createHash("sha256").update(path).digest("hex").slice(0, 12);
-      const target = join(SNAPSHOT_DIR, `${basename(path)}.${digest}.${Math.round(stats.mtimeMs)}.db`);
-      copyFileSync(path, target);
+      const key = `${digest}.${Math.round(stats.mtimeMs)}.${stats.size}`;
+
+      const existing = this.#snapshots.get(key);
+      if (existing && existsSync(existing.path)) {
+        existing.users.add(handleId);
+        return { path: existing.path, key };
+      }
+
+      const target = join(SNAPSHOT_DIR, `${basename(path)}.${key}.db`);
+      await pipeline(createReadStream(path), createWriteStream(target));
       for (const suffix of ["-wal", "-shm"] as const) {
         const sidecar = `${path}${suffix}`;
         if (!existsSync(sidecar)) continue;
         try {
-          copyFileSync(sidecar, `${target}${suffix}`);
+          await pipeline(createReadStream(sidecar), createWriteStream(`${target}${suffix}`));
         } catch {
           warnings.push(`Could not copy ${basename(sidecar)}; the snapshot may miss the newest changes.`);
         }
       }
-      return target;
+      this.#snapshots.set(key, { path: target, users: new Set([handleId]) });
+      return { path: target, key };
     } catch (error) {
       warnings.push(`Snapshot copy failed: ${classifySqliteError(error).message}`);
       return null;
     }
+  }
+
+  /** Drops one handle's claim on a snapshot; the files go when the last one closes. */
+  #releaseSnapshot(key: string, handleId: string): void {
+    const snapshot = this.#snapshots.get(key);
+    if (!snapshot) return;
+    snapshot.users.delete(handleId);
+    if (snapshot.users.size > 0) return;
+    this.#snapshots.delete(key);
+    this.#deleteSnapshotFiles(snapshot.path);
   }
 
   #deleteSnapshotFiles(snapshotPath: string): void {

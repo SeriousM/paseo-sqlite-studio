@@ -17,7 +17,7 @@ function scratchDirectory(): string {
   return directory;
 }
 
-function fixture(): { engine: SqliteEngine; jobs: JobRegistry; handleId: string; directory: string } {
+async function fixture(): Promise<{ engine: SqliteEngine; jobs: JobRegistry; handleId: string; directory: string }> {
   const directory = scratchDirectory();
   const path = join(directory, "fixture.db");
   const db = new DatabaseSync(path);
@@ -32,7 +32,7 @@ function fixture(): { engine: SqliteEngine; jobs: JobRegistry; handleId: string;
 
   const engine = new SqliteEngine();
   engines.push(engine);
-  const opened = engine.open(path);
+  const opened = await engine.open(path);
   if (!opened.ok) throw new Error("fixture database did not open");
   const jobs = new JobRegistry(engine);
   registries.push(jobs);
@@ -67,7 +67,7 @@ afterEach(() => {
 
 describe("SQL jobs", () => {
   it("runs a select in a worker and returns encoded rows", async () => {
-    const { jobs, handleId } = fixture();
+    const { jobs, handleId } = await fixture();
     const { jobId } = jobs.start({ kind: "sql", handleId, sql: "select id, name, blob_col from items order by id", limit: 5 });
     const status = await waitForJob(jobs, jobId);
     expect(status.state).toBe("done");
@@ -83,7 +83,7 @@ describe("SQL jobs", () => {
   });
 
   it("fails with the database message for bad SQL", async () => {
-    const { jobs, handleId } = fixture();
+    const { jobs, handleId } = await fixture();
     const { jobId } = jobs.start({ kind: "sql", handleId, sql: "select * from missing_table", limit: 10 });
     const status = await waitForJob(jobs, jobId);
     expect(status.state).toBe("failed");
@@ -91,7 +91,7 @@ describe("SQL jobs", () => {
   });
 
   it("rejects writes because the handle is read-only", async () => {
-    const { jobs, handleId } = fixture();
+    const { jobs, handleId } = await fixture();
     const { jobId } = jobs.start({ kind: "sql", handleId, sql: "delete from items", limit: 10 });
     const status = await waitForJob(jobs, jobId);
     expect(status.state).toBe("failed");
@@ -99,7 +99,7 @@ describe("SQL jobs", () => {
   });
 
   it("cancels a long-running query", async () => {
-    const { jobs, handleId } = fixture();
+    const { jobs, handleId } = await fixture();
     const { jobId } = jobs.start({
       kind: "sql",
       handleId,
@@ -112,15 +112,15 @@ describe("SQL jobs", () => {
     expect(jobs.cancel(jobId)).toBe(false);
   });
 
-  it("rejects an unknown job id", () => {
-    const { jobs } = fixture();
+  it("rejects an unknown job id", async () => {
+    const { jobs } = await fixture();
     expect(() => jobs.poll("nope")).toThrow(/no longer tracked/i);
   });
 });
 
 describe("export jobs", () => {
   it("writes CSV, JSONL, SQL, Markdown, and HTML files", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const expectations: Array<{ format: "csv" | "jsonl" | "sql" | "markdown" | "html"; check: (text: string) => void }> = [
       { format: "csv", check: (text) => expect(text.split("\r\n")[0]).toBe("id,name,blob_col") },
       { format: "jsonl", check: (text) => expect(JSON.parse(text.split("\n")[0] ?? "{}")).toMatchObject({ id: 1, name: "item-1" }) },
@@ -147,7 +147,7 @@ describe("export jobs", () => {
   });
 
   it("honours filters and refuses to overwrite without permission", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const target = join(directory, "filtered.csv");
     const first = jobs.start({
       kind: "export",
@@ -180,7 +180,7 @@ describe("export jobs", () => {
   });
 
   it("exports a caller-provided select", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const target = join(directory, "custom.csv");
     const { jobId } = jobs.start({
       kind: "export",
@@ -197,7 +197,7 @@ describe("export jobs", () => {
   });
 
   it("fails clearly when the target directory does not exist", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const { jobId } = jobs.start({
       kind: "export",
       handleId,
@@ -212,8 +212,8 @@ describe("export jobs", () => {
 });
 
 describe("job registry limits", () => {
-  it("keeps the running-job count bounded", () => {
-    const { jobs, handleId } = fixture();
+  it("keeps the running-job count bounded", async () => {
+    const { jobs, handleId } = await fixture();
     const started: string[] = [];
     for (let index = 0; index < 4; index += 1) {
       started.push(
@@ -234,7 +234,7 @@ describe("job registry limits", () => {
 
 describe("export writer edge cases", () => {
   it("writes an empty result with only a header", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const target = join(directory, "empty.csv");
     const { jobId } = jobs.start({
       kind: "export",
@@ -252,7 +252,7 @@ describe("export writer edge cases", () => {
   });
 
   it("fails on a non-SQLite target instead of writing garbage", async () => {
-    const { jobs, handleId, directory } = fixture();
+    const { jobs, handleId, directory } = await fixture();
     const target = join(directory, "broken.csv");
     writeFileSync(target, "existing");
     const { jobId } = jobs.start({
