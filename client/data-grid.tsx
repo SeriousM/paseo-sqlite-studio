@@ -22,6 +22,7 @@ export interface CellTarget {
 }
 
 export interface DataGridProps extends ViewerHost {
+  hostId: string;
   handleId: string;
   object: string;
   columns: GridColumn[];
@@ -55,6 +56,7 @@ interface PageRef {
 export function DataGrid({
   theme,
   layout,
+  hostId,
   handleId,
   object,
   columns,
@@ -103,7 +105,7 @@ export function DataGrid({
     [object, pageSize, page.cursor, page.offset, sort, filters, query, countExact, reloadKey],
   );
 
-  const rowsQuery = useRows(handleId, request);
+  const rowsQuery = useRows(hostId, handleId, request);
   const result = rowsQuery.data;
   const rows = result?.rows ?? [];
   const keys = result?.keys ?? [];

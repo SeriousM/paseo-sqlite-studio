@@ -25,6 +25,8 @@ import { formatBytesForHumans } from "./format";
 import type { ViewerHost } from "./types";
 
 export interface DatabaseViewProps extends ViewerHost {
+  /** Identifies the daemon this database lives on; every query key includes it. */
+  hostId: string;
   handleId: string;
   database: OpenedDatabase;
   pageSize: number;
@@ -44,7 +46,7 @@ function directoryOf(path: string): string {
   return separator > 0 ? path.slice(0, separator) : path;
 }
 
-export function DatabaseView({ theme, layout, handleId, database, pageSize, onClose }: DatabaseViewProps) {
+export function DatabaseView({ theme, layout, hostId, handleId, database, pageSize, onClose }: DatabaseViewProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("data");
   // Compact clients toggle between the object list and the content; they start on the list.
@@ -59,8 +61,8 @@ export function DatabaseView({ theme, layout, handleId, database, pageSize, onCl
   const [exportOpen, setExportOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const schema = useSchema(handleId);
-  const detail = useObjectDetail(handleId, selected);
+  const schema = useSchema(hostId, handleId);
+  const detail = useObjectDetail(hostId, handleId, selected);
   const setWriting = useSetWriting();
   const settings = useSettings(viewerSettings);
 
@@ -300,6 +302,7 @@ export function DatabaseView({ theme, layout, handleId, database, pageSize, onCl
               <DataGrid
                 theme={theme}
                 layout={layout}
+                hostId={hostId}
                 handleId={handleId}
                 object={selected}
                 columns={visibleColumns}

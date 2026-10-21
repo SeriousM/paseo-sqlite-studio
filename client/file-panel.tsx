@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useOpenDatabase, type OpenedDatabase } from "./api";
 import { DatabaseView } from "./database-view";
-import type { ViewerHost } from "./types";
+import type { ViewerSurface } from "./types";
 
 /**
  * The host hands a file panel the path on the daemon that owns it, so the
  * database is opened where it lives: nothing but query results crosses the wire.
  */
-export interface SqliteFilePanelProps extends ViewerHost {
+export interface SqliteFilePanelProps extends ViewerSurface {
   file: { path: string; name: string };
   pageSize?: number;
 }
 
-export function SqliteFilePanel({ theme, layout, file, pageSize }: SqliteFilePanelProps) {
+export function SqliteFilePanel({ theme, layout, host, file, pageSize }: SqliteFilePanelProps) {
   const openDatabase = useOpenDatabase();
   const [database, setDatabase] = useState<OpenedDatabase | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +40,12 @@ export function SqliteFilePanel({ theme, layout, file, pageSize }: SqliteFilePan
   );
 
   useEffect(() => {
-    if (openedPathRef.current === file.path) return;
-    openedPathRef.current = file.path;
+    const target = `${host.id}:${file.path}`;
+    if (openedPathRef.current === target) return;
+    openedPathRef.current = target;
     setDatabase(null);
     void open("direct");
-  }, [file.path, open]);
+  }, [file.path, host.id, open]);
 
   const styles = useMemo(
     () => ({
@@ -73,8 +74,10 @@ export function SqliteFilePanel({ theme, layout, file, pageSize }: SqliteFilePan
   if (database !== null) {
     return (
       <DatabaseView
+        key={`${host.id}:${database.handleId}`}
         theme={theme}
         layout={layout}
+        hostId={host.id}
         handleId={database.handleId}
         database={database}
         pageSize={pageSize ?? 200}

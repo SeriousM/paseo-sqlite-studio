@@ -14,7 +14,7 @@ function directoryOf(path: string): string {
   return separator > 0 ? path.slice(0, separator) : path;
 }
 
-export function SqliteScreen({ theme, layout, params }: PluginScreenProps) {
+export function SqliteScreen({ theme, layout, host, params }: PluginScreenProps) {
   const settings = useSettings(viewerSettings);
   const ready = settings.status === "ready";
   const values = ready ? settings.values : null;
@@ -28,7 +28,7 @@ export function SqliteScreen({ theme, layout, params }: PluginScreenProps) {
   const [autoOpened, setAutoOpened] = useState(false);
 
   const openDatabase = useOpenDatabase();
-  const directory = useDirectory(browsePath);
+  const directory = useDirectory(host.id, browsePath);
 
   const pageSize = values?.pageSize ?? 200;
   const recents = values?.recentPaths ?? [];
@@ -68,6 +68,15 @@ export function SqliteScreen({ theme, layout, params }: PluginScreenProps) {
     [openDatabase, remember],
   );
 
+  // Paseo shows one screen for every connected daemon and switches the host in the
+  // header, so a host change abandons the database opened on the previous host.
+  useEffect(() => {
+    setDatabase(null);
+    setError(null);
+    setLockOffer(null);
+    setBrowsePath(null);
+  }, [host.id]);
+
   const initialPath = params.path ?? "";
   const autoOpenRef = useRef(false);
   useEffect(() => {
@@ -95,8 +104,10 @@ export function SqliteScreen({ theme, layout, params }: PluginScreenProps) {
   if (database !== null) {
     return (
       <DatabaseView
+        key={`${host.id}:${database.handleId}`}
         theme={theme}
         layout={layout}
+        hostId={host.id}
         handleId={database.handleId}
         database={database}
         pageSize={pageSize}

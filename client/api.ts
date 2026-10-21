@@ -73,37 +73,37 @@ export function useCloseDatabase() {
   return useMutation({ mutationFn: (handleId: string) => close({ handleId }) });
 }
 
-export function useDirectory(path: string | null) {
+export function useDirectory(hostId: string, path: string | null) {
   const list = useRpc(listDirectory);
   return useQuery({
-    queryKey: ["sqlite", "directory", path],
+    queryKey: ["sqlite", hostId, "directory", path],
     enabled: path !== null && path.length > 0,
     queryFn: () => list({ path: path ?? "" }),
   });
 }
 
-export function useSchema(handleId: string | null) {
+export function useSchema(hostId: string, handleId: string | null) {
   const schema = useRpc(readSchema);
   return useQuery({
-    queryKey: ["sqlite", "schema", handleId],
+    queryKey: ["sqlite", hostId, "schema", handleId],
     enabled: handleId !== null,
     queryFn: () => schema({ handleId: handleId ?? "" }),
   });
 }
 
-export function useObjectDetail(handleId: string | null, name: string | null) {
+export function useObjectDetail(hostId: string, handleId: string | null, name: string | null) {
   const read = useRpc(readObject);
   return useQuery({
-    queryKey: ["sqlite", "object", handleId, name],
+    queryKey: ["sqlite", hostId, "object", handleId, name],
     enabled: handleId !== null && name !== null,
     queryFn: () => read({ handleId: handleId ?? "", name: name ?? "" }),
   });
 }
 
-export function useRows(handleId: string | null, request: RowRequest, enabled = true) {
+export function useRows(hostId: string, handleId: string | null, request: RowRequest, enabled = true) {
   const rows = useRpc(readRows);
   return useQuery({
-    queryKey: ["sqlite", "rows", handleId, request],
+    queryKey: ["sqlite", hostId, "rows", handleId, request],
     enabled: handleId !== null && enabled,
     queryFn: () => rows({ handleId: handleId ?? "", ...request }),
     // Row data changes on disk, not on a schedule: refetch only when asked.
