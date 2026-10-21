@@ -40,5 +40,10 @@
     "sqlite",
     "database",
     "viewer"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SeriousM/paseo-sqlite-studio.git"
+  },
+  "homepage": "https://github.com/SeriousM/paseo-sqlite-studio"
 }
