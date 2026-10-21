@@ -1,17 +1,20 @@
 {
   "name": "paseo-sqlite",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
+    "README.md",
+    "LICENSE",
     "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
     "index.server.tsx",
     "client/",
     "server/",
-    "shared/"
+    "shared/",
+    "assets/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.test.json",
@@ -27,5 +30,15 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.12",
     "zod": "^4.4.3"
-  }
+  },
+  "description": "SQLite viewer plugin for Paseo: browse schema and rows, run SQL, export, and edit rows on the daemon that owns the database",
+  "license": "MIT",
+  "author": "Bernhard Millauer",
+  "keywords": [
+    "paseo",
+    "paseo-plugin",
+    "sqlite",
+    "database",
+    "viewer"
+  ]
 }
