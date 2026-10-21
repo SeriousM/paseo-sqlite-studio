@@ -6,7 +6,7 @@ daemon and on a remote one.
 
 ## What it does
 
-- Opens `.db`, `.sqlite`, `.sqlite3`, `.db3`, `.s3db`, and `.gpkg` files from the SQLite screen, with a
+- Opens `.db`, `.sqlite`, `.sqlite3`, `.db3`, `.s3db`, and `.gpkg` files from its screen, with a
   path field, a server-side file browser, and a recents list.
 - Shows the schema as a tree: tables, views, virtual tables with their shadow tables nested, indexes,
   and triggers, with counts per group.

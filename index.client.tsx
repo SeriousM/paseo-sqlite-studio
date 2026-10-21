@@ -31,13 +31,13 @@ function SqliteSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps
 
 export default function contribute(client: PluginClientContext) {
   const cleanups: Array<() => void> = [
-    client.addScreen({ id: "sqlite", title: "SQLite", Component: SqliteScreen }),
-    client.addSidebarHeaderItem({ id: "sqlite", title: "SQLite", Component: SqliteSidebarItem }),
+    client.addScreen({ id: "sqlite", title: "SQLite Studio", Component: SqliteScreen }),
+    client.addSidebarHeaderItem({ id: "sqlite", title: "SQLite Studio", Component: SqliteSidebarItem }),
     client.addCommandCenterItem({
       id: "open-sqlite-database",
-      title: "Open SQLite database",
+      title: "Open SQLite Studio",
       icon: "Database",
-      keywords: ["sqlite", "database", "db", "table", "schema", "query"],
+      keywords: ["sqlite", "studio", "database", "db", "table", "schema", "query"],
       context: "global",
       onSelect({ openScreen }) {
         openScreen({ screenId: "sqlite" });
@@ -53,7 +53,7 @@ export default function contribute(client: PluginClientContext) {
     cleanups.push(
       addFilePanel.call(client, {
         id: "sqlite-viewer",
-        title: "SQLite",
+        title: "SQLite Studio",
         icon: "Database",
         files: { extensions: DATABASE_EXTENSIONS },
         Component: SqliteFilePanel,

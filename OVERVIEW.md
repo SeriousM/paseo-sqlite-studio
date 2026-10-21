@@ -11,8 +11,8 @@ what you can look at.
 
 ## Setup
 
-Nothing to configure to browse. Open SQLite from the sidebar, or run Open SQLite database from the
-command center, then pick a file with the path field or the built-in browser. Paths opened before are
+Nothing to configure to browse. Open SQLite Studio from the sidebar, or run its command from the command
+center, then pick a file with the path field or the built-in browser. Paths opened before are
 listed under recents, and the last directory you browsed is remembered per daemon.
 
 Two requirements are worth knowing:
