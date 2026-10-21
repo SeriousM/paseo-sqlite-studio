@@ -1,4 +1,5 @@
-import type { RpcOutput } from "@getpaseo/plugin";
+import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
+import { useEffect, useRef, useState } from "react";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { z } from "zod";
@@ -9,16 +10,24 @@ import type {
   rowQueryResultSchema,
   sortSchema,
   sqliteOpenResultSchema,
+  writeValueSchema,
+  columnAssignmentSchema,
 } from "../shared/contracts";
 import {
+  cancelJob,
   closeDatabase,
+  deleteRow,
+  enableWriting,
+  insertRow,
   listDirectory,
   openDatabase,
   readCell,
   readObject,
+  pollJob,
   readRows,
   readSchema,
-  runQuery,
+  startJob,
+  updateRow,
 } from "../shared/contracts";
 
 export type Cell = z.infer<typeof cellSchema>;
@@ -32,10 +41,15 @@ export type OpenedDatabase = Extract<OpenResult, { ok: true }>;
 export type SchemaResult = RpcOutput<typeof readSchema>;
 export type ObjectSummary = SchemaResult["objects"][number];
 export type ObjectDetail = RpcOutput<typeof readObject>;
+export type ColumnMeta = ObjectDetail["columns"][number];
 export type DirectoryListing = RpcOutput<typeof listDirectory>;
 export type CellValue = RpcOutput<typeof readCell>;
-export type QueryResult = RpcOutput<typeof runQuery>;
 export type DatabaseInfo = OpenedDatabase["info"];
+export type JobStatus = RpcOutput<typeof pollJob>;
+export type JobResult = NonNullable<JobStatus["result"]>;
+export type JobRequest = RpcInput<typeof startJob>;
+export type WriteValue = z.infer<typeof writeValueSchema>;
+export type ColumnAssignment = z.infer<typeof columnAssignmentSchema>;
 
 export interface RowRequest {
   object: string;
@@ -105,9 +119,125 @@ export function useCellValue() {
   });
 }
 
-export function useRunQuery() {
-  const query = useRpc(runQuery);
+/** Polling cadence while a job runs; fast enough to feel live, cheap enough to ignore. */
+const JOB_POLL_MS = 400;
+
+export interface JobRunner {
+  status: JobStatus | null;
+  running: boolean;
+  start: (input: JobRequest) => Promise<void>;
+  cancel: () => Promise<void>;
+  reset: () => void;
+}
+
+/** Starts a daemon-side job and polls it until it settles. */
+export function useJobRunner(): JobRunner {
+  const startJobRpc = useRpc(startJob);
+  const pollJobRpc = useRpc(pollJob);
+  const cancelJobRpc = useRpc(cancelJob);
+  const [status, setStatus] = useState<JobStatus | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (status?.state !== "running") return;
+    const jobId = jobIdRef.current;
+    if (jobId === null) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void pollJobRpc({ jobId })
+        .then((next) => {
+          if (!cancelled) setStatus(next);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          setStatus({
+            jobId,
+            kind: status.kind,
+            state: "failed",
+            startedAt: status.startedAt,
+            elapsedMs: status.elapsedMs,
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }, JOB_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pollJobRpc, status]);
+
+  return {
+    status,
+    running: status?.state === "running",
+    async start(input) {
+      setStatus(null);
+      try {
+        const { jobId } = await startJobRpc(input);
+        jobIdRef.current = jobId;
+        setStatus({
+          jobId,
+          kind: input.kind,
+          state: "running",
+          startedAt: Date.now(),
+          elapsedMs: 0,
+          result: null,
+          error: null,
+        });
+      } catch (error) {
+        setStatus({
+          jobId: "",
+          kind: input.kind,
+          state: "failed",
+          startedAt: Date.now(),
+          elapsedMs: 0,
+          result: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    async cancel() {
+      const jobId = jobIdRef.current;
+      if (jobId === null) return;
+      await cancelJobRpc({ jobId });
+      setStatus(await pollJobRpc({ jobId }));
+    },
+    reset() {
+      jobIdRef.current = null;
+      setStatus(null);
+    },
+  };
+}
+
+export function useSetWriting() {
+  const setWriting = useRpc(enableWriting);
   return useMutation({
-    mutationFn: (input: { handleId: string; sql: string; limit?: number }) => query(input),
+    mutationFn: (input: { handleId: string; enabled: boolean }) => setWriting(input),
+  });
+}
+
+export function useInsertRow() {
+  const insert = useRpc(insertRow);
+  return useMutation({
+    mutationFn: (input: { handleId: string; object: string; values: ColumnAssignment[] }) => insert(input),
+  });
+}
+
+export function useUpdateRow() {
+  const update = useRpc(updateRow);
+  return useMutation({
+    mutationFn: (input: {
+      handleId: string;
+      object: string;
+      key: KeyValue[];
+      changes: ColumnAssignment[];
+    }) => update(input),
+  });
+}
+
+export function useDeleteRow() {
+  const remove = useRpc(deleteRow);
+  return useMutation({
+    mutationFn: (input: { handleId: string; object: string; key: KeyValue[] }) => remove(input),
   });
 }

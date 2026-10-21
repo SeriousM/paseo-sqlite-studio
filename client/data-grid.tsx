@@ -1,7 +1,8 @@
 import { FlatList, ScrollView, TextInput } from "@getpaseo/plugin/client/react-native";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { useRows, type Cell, type KeyValue, type Sort } from "./api";
+import { useRows, type Cell, type Filter, type KeyValue, type Sort } from "./api";
+import { FilterModal } from "./filter-modal";
 import { RecordCards } from "./record-cards";
 import { columnWidth, displayCell } from "./format";
 import type { ViewerHost } from "./types";
@@ -16,6 +17,8 @@ export interface CellTarget {
   column: string;
   key: KeyValue[];
   cell: Cell;
+  /** The whole row, aligned with the grid's `columns`, for the row editor. */
+  row: Cell[];
 }
 
 export interface DataGridProps extends ViewerHost {
@@ -23,7 +26,20 @@ export interface DataGridProps extends ViewerHost {
   object: string;
   columns: GridColumn[];
   pageSize: number;
+  filters: Filter[];
+  onFiltersChange: (filters: Filter[]) => void;
+  /** Owned by the parent so an export can reuse the same view of the data. */
+  search: string;
+  onSearchChange: (search: string) => void;
+  sort: Sort[];
+  onSortChange: (sort: Sort[]) => void;
+  /** Bump to refetch after a write. */
+  reloadKey: number;
   onOpenCell: (target: CellTarget) => void;
+  /** Present when the database is writable; the grid then offers row actions. */
+  onInsertRow?: (() => void) | undefined;
+  onEditRow?: ((target: CellTarget) => void) | undefined;
+  onExport?: (() => void) | undefined;
 }
 
 const ROW_HEIGHT = 32;
@@ -36,11 +52,28 @@ interface PageRef {
   offset: number;
 }
 
-export function DataGrid({ theme, layout, handleId, object, columns, pageSize, onOpenCell }: DataGridProps) {
-  const [search, setSearch] = useState("");
+export function DataGrid({
+  theme,
+  layout,
+  handleId,
+  object,
+  columns,
+  pageSize,
+  filters,
+  onFiltersChange,
+  search,
+  onSearchChange,
+  sort,
+  onSortChange,
+  reloadKey,
+  onOpenCell,
+  onInsertRow,
+  onEditRow,
+  onExport,
+}: DataGridProps) {
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<Sort[]>([]);
   const [countExact, setCountExact] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [pages, setPages] = useState<PageRef[]>([{ cursor: null, offset: 0 }]);
   const [pageIndex, setPageIndex] = useState(0);
 
@@ -53,7 +86,7 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
     setPages([{ cursor: null, offset: 0 }]);
     setPageIndex(0);
     setCountExact(false);
-  }, [object, query, sort]);
+  }, [object, query, sort, filters, reloadKey]);
 
   const page = pages[Math.min(pageIndex, pages.length - 1)] ?? { cursor: null, offset: 0 };
   const request = useMemo(
@@ -63,10 +96,11 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
       cursor: page.cursor,
       offset: page.offset,
       sort,
+      filters,
       search: query,
       countExact,
     }),
-    [object, pageSize, page.cursor, page.offset, sort, query, countExact],
+    [object, pageSize, page.cursor, page.offset, sort, filters, query, countExact, reloadKey],
   );
 
   const rowsQuery = useRows(handleId, request);
@@ -107,6 +141,28 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
         borderColor: theme.colors.border,
       },
       buttonDisabled: { opacity: 0.4 },
+      buttonActive: { borderColor: theme.colors.accent },
+      chips: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        gap: 6,
+        paddingHorizontal: layout.compact ? 8 : 12,
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+      },
+      chip: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        gap: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+      },
+      chipText: { color: theme.colors.foreground, fontSize: 11 },
       buttonText: { color: theme.colors.foreground, fontSize: 12 },
       headerRow: {
         flexDirection: "row" as const,
@@ -170,9 +226,9 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
 
   function toggleSort(column: string) {
     const current = sortDirection(column);
-    if (current === null) setSort([{ column, direction: "asc" }]);
-    else if (current === "asc") setSort([{ column, direction: "desc" }]);
-    else setSort([]);
+    if (current === null) onSortChange([{ column, direction: "asc" }]);
+    else if (current === "asc") onSortChange([{ column, direction: "desc" }]);
+    else onSortChange([]);
   }
 
   function goToNextPage() {
@@ -206,7 +262,7 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
         <View style={styles.toolbar}>
           <TextInput
             value={search}
-            onChangeText={setSearch}
+            onChangeText={onSearchChange}
             placeholder="Search all columns"
             placeholderTextColor={theme.colors.foregroundMuted}
             style={styles.search}
@@ -223,7 +279,7 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
       <View style={styles.toolbar}>
         <TextInput
           value={search}
-          onChangeText={setSearch}
+          onChangeText={onSearchChange}
           placeholder="Search all columns"
           placeholderTextColor={theme.colors.foregroundMuted}
           style={styles.search}
@@ -231,6 +287,24 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
           autoCorrect={false}
         />
         <Text style={styles.status}>{statusText}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Edit filters"
+          style={[styles.button, filters.length > 0 ? styles.buttonActive : null]}
+          onPress={() => setFilterOpen(true)}
+        >
+          <Text style={styles.buttonText}>{filters.length > 0 ? `Filters (${filters.length})` : "Filters"}</Text>
+        </Pressable>
+        {onInsertRow ? (
+          <Pressable accessibilityRole="button" style={styles.button} onPress={onInsertRow}>
+            <Text style={styles.buttonText}>Add row</Text>
+          </Pressable>
+        ) : null}
+        {onExport ? (
+          <Pressable accessibilityRole="button" style={styles.button} onPress={onExport}>
+            <Text style={styles.buttonText}>Export</Text>
+          </Pressable>
+        ) : null}
         {result && result.rowCount === null ? (
           <Pressable accessibilityRole="button" style={styles.button} onPress={() => setCountExact(true)}>
             <Text style={styles.buttonText}>Count all</Text>
@@ -245,6 +319,26 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
           <Text style={styles.buttonText}>Reload</Text>
         </Pressable>
       </View>
+
+      {filters.length === 0 ? null : (
+        <View style={styles.chips}>
+          {filters.map((filter, index) => (
+            <Pressable
+              key={`${filter.column}-${filter.operator}-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove filter on ${filter.column}`}
+              style={styles.chip}
+              onPress={() => onFiltersChange(filters.filter((_entry, position) => position !== index))}
+            >
+              <Text style={styles.chipText}>
+                {filter.column} {filter.operator}
+                {filter.value === undefined ? "" : ` ${filter.value}`}
+              </Text>
+              <Text style={styles.chipText}>×</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {rowsQuery.isError ? (
         <Text style={styles.error}>{String(rowsQuery.error.message)}</Text>
@@ -287,7 +381,25 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
               removeClippedSubviews
               renderItem={({ item, index }) => (
                 <View style={[styles.row, index % 2 === 1 ? styles.rowAlt : null]}>
-                  <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>{page.offset + index + 1}</Text>
+                  {onEditRow ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit row ${page.offset + index + 1}`}
+                      style={{ width: GUTTER_WIDTH }}
+                      onPress={() =>
+                        onEditRow({
+                          column: columns[0]?.name ?? "",
+                          key: keys[index] ?? [],
+                          cell: item[0] ?? null,
+                          row: item,
+                        })
+                      }
+                    >
+                      <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>{page.offset + index + 1}</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>{page.offset + index + 1}</Text>
+                  )}
                   {columns.map((column, columnIndex) => {
                     const cell = item[columnIndex] ?? null;
                     const display = displayCell(cell);
@@ -297,7 +409,7 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
                         key={column.name}
                         accessibilityRole="button"
                         accessibilityLabel={`${column.name}: ${display.title}`}
-                        onPress={() => onOpenCell({ column: column.name, key: rowKey, cell })}
+                        onPress={() => onOpenCell({ column: column.name, key: rowKey, cell, row: item })}
                         style={[styles.cell, { width: widths[columnIndex] ?? 160 }]}
                       >
                         <Text numberOfLines={1} style={toneStyle(display.tone)}>
@@ -312,6 +424,16 @@ export function DataGrid({ theme, layout, handleId, object, columns, pageSize, o
           </View>
         </ScrollView>
       )}
+
+      <FilterModal
+        theme={theme}
+        layout={layout}
+        open={filterOpen}
+        columns={columns}
+        filters={filters}
+        onApply={onFiltersChange}
+        onClose={() => setFilterOpen(false)}
+      />
 
       <View style={styles.toolbar}>
         <Pressable

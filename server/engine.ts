@@ -49,6 +49,8 @@ const MAX_HANDLES = 12;
 
 export interface DatabaseEntry {
   handleId: string;
+  /** False once the user turns on editing for this handle. */
+  readOnly: boolean;
   /** Canonical path the user opened; the snapshot path, when present, is a copy of it. */
   path: string;
   snapshotPath: string | null;
@@ -263,6 +265,43 @@ export class SqliteEngine {
     return this.#register(opened.db, absolute, snapshotPath, probe, warnings);
   }
 
+  /**
+   * Switches one handle between read-only and writable. A snapshot copy stays
+   * read-only: writing to a copy would silently discard the user's work.
+   */
+  setWritable(handleId: string, writable: boolean): { readOnly: boolean; warning: string | null } {
+    const entry = this.get(handleId);
+    if (writable && entry.snapshotPath !== null) {
+      return {
+        readOnly: true,
+        warning: "This handle reads a snapshot copy. Reopen the file directly to edit it.",
+      };
+    }
+    if (entry.readOnly === !writable) return { readOnly: entry.readOnly, warning: null };
+
+    const { DatabaseSync } = requireSqlite();
+    const path = entry.snapshotPath ?? entry.path;
+    const replacement = writable
+      ? new DatabaseSync(path, { timeout: 5000 })
+      : new DatabaseSync(path, { readOnly: true, timeout: 750 });
+    if (writable) replacement.exec("pragma busy_timeout = 5000");
+    readDatabaseInfo(replacement);
+    try {
+      entry.db.close();
+    } catch {
+      // The old handle is being replaced either way.
+    }
+    entry.db = replacement;
+    entry.readOnly = !writable;
+    entry.lastUsedAt = Date.now();
+    return { readOnly: entry.readOnly, warning: null };
+  }
+
+  /** Handles this engine currently holds; used by diagnostics and tests. */
+  list(): DatabaseEntry[] {
+    return [...this.#entries.values()];
+  }
+
   get(handleId: string): DatabaseEntry {
     const entry = this.#entries.get(handleId);
     if (!entry) throw new Error("This database is no longer open. Reopen it and try again.");
@@ -301,6 +340,7 @@ export class SqliteEngine {
       .slice(0, 16);
     const entry: DatabaseEntry = {
       handleId,
+      readOnly: true,
       path,
       snapshotPath,
       db,

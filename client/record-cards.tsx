@@ -107,7 +107,7 @@ export function RecordCards({ theme, layout, columns, rows, keys, loading, error
                     key={column.name}
                     accessibilityRole="button"
                     accessibilityLabel={`${column.name}: ${display.title}`}
-                    onPress={() => onOpenCell({ column: column.name, key: rowKey, cell })}
+                    onPress={() => onOpenCell({ column: column.name, key: rowKey, cell, row: item })}
                     style={layout.compact ? styles.field : styles.fieldWide}
                   >
                     <Text numberOfLines={1} style={[styles.fieldName, layout.compact ? null : styles.fieldNameFixed]}>

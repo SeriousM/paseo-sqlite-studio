@@ -1,26 +1,79 @@
-<!--
-OVERVIEW.md is required to list your plugin in the registry. Keep it beside
-paseo-plugin.json in your repository at the pinned commit and in your npm package.
-Replace this comment with useful facts before publishing.
+# SQLite viewer
 
-This overview is for people choosing a plugin in Paseo, on the plugin page under
-its install command. README assumes a GitHub audience and includes technical
-details, installation instructions, and badges. Long, AI-generated READMEs leave
-people reading past that material to understand what the plugin does.
+Browse and edit SQLite databases inside Paseo. Open a database from the SQLite screen, or from the
+file viewer once the app supports plugin file panels, and work with it the way a desktop database
+tool would: a schema tree, a data grid, a structure report, a read-only SQL console, exports, and
+optional row editing.
 
-Write these parts in order, including only what helps someone decide to install:
+The plugin reads databases on the daemon that owns them. A database on a remote machine is queried
+on that machine and only the results travel to your client, so file size and location do not limit
+what you can look at.
 
-1. Describe what your plugin is and does in plain terms first.
-2. Explain how it works only when it is not obvious.
-3. Explain setup when needed: settings, accounts, tokens, providers, tools, or
-   other plugins. Include applicable daemon version and operating system
-   requirements. Setup guidance is allowed; installation instructions are not.
-4. Explain capabilities and settings worth understanding, what each option does,
-   what the plugin reads or sends and where, permissions, and known limits.
+## Setup
 
-Length follows complexity; a theme needs one paragraph. Choose headings only
-when they help. Use sentence case and plain factual language, with no em dashes.
-Omit installation commands, badges, changelog, contributing or license sections,
-marketing, and unsupported claims. Avoid implementation filler such as empty
-cleanup functions, theme-token field lists, or lists of absent features.
--->
+Nothing to configure to browse. Open SQLite from the sidebar, or run Open SQLite database from the
+command center, then pick a file with the path field or the built-in browser. Paths opened before are
+listed under recents, and the last directory you browsed is remembered per daemon.
+
+Two requirements are worth knowing:
+
+- The daemon host needs Node 22.13 or newer, because the plugin uses Node's own SQLite module. The
+  desktop app bundles a suitable runtime. A daemon installed through npm or Docker uses the Node on
+  that machine, and the plugin says so plainly when the module is missing.
+- Opening a database directly from a file tab needs Paseo 0.13.0 or later. Until then the file viewer
+  keeps showing its binary preview message and the plugin opens from its own screen.
+
+## Reading databases
+
+Databases open read-only. When another process holds a write lock, the plugin copies the file to a
+snapshot in the daemon's temporary directory and reads the copy, with a warning shown in the header;
+a snapshot can miss changes that were not yet checkpointed, and it is deleted when you close the
+database. Files that are not SQLite databases, including encrypted databases, are reported as such
+instead of failing obscurely.
+
+The schema tree groups tables, views, virtual tables, indexes, and triggers, and nests the shadow
+tables of a virtual table under it. Selecting an object shows its structure: columns with declared
+type, nullability, defaults, primary key position, uniqueness, and generated columns, plus indexes,
+foreign keys with their actions, and the original DDL.
+
+Rows are paged rather than loaded whole, with sorting, a search across all columns, and per-column
+filters. The exact row count is computed only when you ask for it, because counting a large table
+takes as long as reading it. Long text and binary values arrive as previews; the full value is
+fetched when you open a cell, and binary values are shown as base64.
+
+The SQL console runs read-only statements against the open database and keeps your last statements as
+history. Statements that can take a long time run as a job that reports progress and can be
+cancelled; the console notes when a scan hit its time budget and more rows exist.
+
+Exports write a file on the machine running the daemon, in CSV, TSV, JSON, JSONL, Markdown, SQL
+insert statements, or HTML. An export covers the current filters and sort, refuses to replace an
+existing file unless you allow it, and stops with a warning after five million rows.
+
+## Editing rows
+
+Editing is off by default. Enabling it for a database opens the file for writing and asks once per
+path before doing so. With editing on, a row can be inserted, updated, or deleted from the grid;
+changes run immediately against the real file inside a transaction, there is no undo, and other
+programs reading the file see them. Primary keys and row identities are used to target a single row,
+and a statement that matches no row reports that instead of doing nothing quietly. Editing a snapshot
+copy is refused, and switching editing off closes the writable handle.
+
+## Prompt attachments
+
+The SQLite attachment source in the composer attaches a table as context for an agent: the DDL, the
+column list with keys and defaults, indexes, foreign keys, and a few sample rows, bounded to about
+four kilobytes. It searches tables and views in the databases you opened recently, on the daemon that
+owns them.
+
+## Data and permissions
+
+The plugin runs unsandboxed as trusted code. Server code reads the database files you open, writes
+snapshot copies to the daemon's temporary directory, and writes export files to the paths you choose.
+It sends nothing anywhere else and contacts no external service. Settings are stored per daemon: the
+recent database paths, the SQL history, the paths you allowed editing on, the page size, and the last
+browsed directory. Editing state and history stay on the daemon, and removing the plugin removes
+them.
+
+Known limits: no schema changes (no `CREATE`, `ALTER`, or `DROP` from the interface), no import, no
+multi-statement execution, and no write access from the SQL console. Encrypted databases and
+non-SQLite files cannot be opened.

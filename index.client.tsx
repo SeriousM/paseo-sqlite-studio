@@ -1,6 +1,7 @@
 import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import type { ComponentType } from "react";
+import { sqliteAttachments } from "./shared/attachment";
 import { SqliteFilePanel, type SqliteFilePanelProps } from "./client/file-panel";
 import { SqliteScreen } from "./client/sqlite-screen";
 
@@ -42,6 +43,7 @@ export default function contribute(client: PluginClientContext) {
         openScreen({ screenId: "sqlite" });
       },
     }),
+    client.addAttachmentSource(sqliteAttachments),
   ];
 
   // File panels arrive with Paseo 0.13. Registering only when the host offers

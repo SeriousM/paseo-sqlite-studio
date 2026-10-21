@@ -2,9 +2,13 @@ import { readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
+import type { jobStartInputSchema } from "../shared/contracts";
+
+type JobRequest = z.infer<typeof jobStartInputSchema>;
 import type { keyValueSchema } from "../shared/contracts";
 import { classifySqliteError, readDatabaseInfo, type SqliteEngine } from "./engine";
-import { runRowQuery, runSql, type RowQuerySpec } from "./rows";
+import type { JobRegistry } from "./jobs";
+import { runRowQuery, type RowQuerySpec } from "./rows";
 import {
   describeColumns,
   hasRowId,
@@ -15,9 +19,12 @@ import {
   primaryKeyColumns,
   quoteIdentifier,
 } from "./schema";
-import { bindValue } from "./values";
+import type { columnAssignmentSchema } from "../shared/contracts";
+import { addressClause } from "./addressing";
+import { deleteRowOf, insertRowOf, updateRowOf } from "./mutations";
 
 type KeyValue = z.infer<typeof keyValueSchema>;
+type ColumnAssignment = z.infer<typeof columnAssignmentSchema>;
 
 const DEFAULT_DATABASE_EXTENSIONS = ["db", "sqlite", "sqlite3", "db3", "s3db", "gpkg", "sqlite2"];
 const MAX_DIRECTORY_ENTRIES = 1000;
@@ -37,23 +44,6 @@ function withDatabase<T>(engine: SqliteEngine, handleId: string, run: (db: Datab
   } catch (error) {
     throw readableError(error);
   }
-}
-
-/** The WHERE clause that addresses exactly one row. */
-function addressClause(db: DatabaseSync, object: string, key: readonly KeyValue[]): { sql: string; params: unknown[] } {
-  if (hasRowId(db, object)) {
-    if (key.length !== 1) throw new Error("This row is addressed by its rowid, which is missing.");
-    return { sql: "rowid = ?", params: [bindValue(key[0] ?? null)] };
-  }
-  const primaryKey = primaryKeyColumns(db, object);
-  if (primaryKey.length === 0) {
-    throw new Error(`${object} has no primary key, so a single row cannot be addressed.`);
-  }
-  if (key.length !== primaryKey.length) throw new Error("This row's primary key is incomplete.");
-  return {
-    sql: primaryKey.map((column) => `${quoteIdentifier(column)} = ?`).join(" and "),
-    params: key.map((value) => bindValue(value)),
-  };
 }
 
 export function listPath(input: { path: string; extensions?: readonly string[] | null }) {
@@ -192,6 +182,60 @@ export function readCellOf(
   });
 }
 
-export function runQueryOf(engine: SqliteEngine, input: { handleId: string; sql: string; limit?: number | undefined }) {
-  return withDatabase(engine, input.handleId, (db) => runSql(db, input.sql, input.limit ?? 200));
+export function startJobOf(jobs: JobRegistry, input: JobRequest) {
+  return jobs.start(input);
+}
+
+export function pollJobOf(jobs: JobRegistry, input: { jobId: string }) {
+  return jobs.poll(input.jobId);
+}
+
+export function cancelJobOf(jobs: JobRegistry, input: { jobId: string }) {
+  return { cancelled: jobs.cancel(input.jobId) };
+}
+
+export function setWriting(engine: SqliteEngine, input: { handleId: string; enabled: boolean }) {
+  return engine.setWritable(input.handleId, input.enabled);
+}
+
+function requireWritable(engine: SqliteEngine, handleId: string) {
+  const entry = engine.get(handleId);
+  if (entry.readOnly) throw new Error("Editing is off for this database. Turn it on to change rows.");
+  return entry;
+}
+
+export function insertRowIn(
+  engine: SqliteEngine,
+  input: { handleId: string; object: string; values: readonly ColumnAssignment[] },
+) {
+  const entry = requireWritable(engine, input.handleId);
+  try {
+    return insertRowOf(entry.db, input);
+  } catch (error) {
+    throw readableError(error);
+  }
+}
+
+export function updateRowIn(
+  engine: SqliteEngine,
+  input: { handleId: string; object: string; key: readonly KeyValue[]; changes: readonly ColumnAssignment[] },
+) {
+  const entry = requireWritable(engine, input.handleId);
+  try {
+    return updateRowOf(entry.db, input);
+  } catch (error) {
+    throw readableError(error);
+  }
+}
+
+export function deleteRowIn(
+  engine: SqliteEngine,
+  input: { handleId: string; object: string; key: readonly KeyValue[] },
+) {
+  const entry = requireWritable(engine, input.handleId);
+  try {
+    return deleteRowOf(entry.db, input);
+  } catch (error) {
+    throw readableError(error);
+  }
 }

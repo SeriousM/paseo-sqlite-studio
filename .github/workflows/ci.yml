@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Check both runtime bundles compile
+        run: |
+          npx --yes esbuild@0.28.1 index.client.tsx --bundle --format=cjs --platform=neutral --target=es2020 \
+            --jsx=automatic --loader:.svg=text --outfile=/tmp/client.js \
+            --external:@getpaseo/plugin --external:@getpaseo/plugin/client --external:@getpaseo/plugin/client/ui \
+            --external:@getpaseo/plugin/client/react-native --external:@getpaseo/plugin/server \
+            --external:@tanstack/react-query --external:react --external:react/jsx-runtime \
+            --external:react-native --external:zod
+          npx --yes esbuild@0.28.1 index.server.ts --bundle --format=cjs --platform=node --target=node20 \
+            --outfile=/tmp/server.js \
+            --external:@getpaseo/plugin --external:@getpaseo/plugin/server --external:zod
+      - name: Check the client bundle stays free of Node and DOM APIs
+        run: |
+          if grep -rnE "document\.|window\.|localStorage|navigator\.|from \"node:" client/ index.client.tsx; then
+            echo "Client code must not use DOM or Node APIs"
+            exit 1
+          fi

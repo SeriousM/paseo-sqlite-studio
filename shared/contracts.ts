@@ -259,16 +259,127 @@ export const readCell = defineRpc({
   }),
 });
 
-export const runQuery = defineRpc({
-  name: "sqlite.query",
-  input: z.object({
-    handleId: z.string(),
-    sql: z.string().min(1).max(100_000),
-    limit: z.number().int().min(1).max(1000).optional(),
-  }),
-  output: rowQueryResultSchema.extend({
-    /** `false` for non-SELECT statements. */
-    returnedRows: z.boolean(),
-    changes: z.number().nullable(),
+/**
+ * A value the user typed for a write. Text stays text, and the column's affinity
+ * decides how SQLite stores it, which is what a form field can honestly express.
+ */
+export const writeValueSchema = z.union([
+  z.null(),
+  z.string(),
+  z.number(),
+  z.object({ kind: z.literal("bigint"), value: z.string() }),
+  z.object({ kind: z.literal("blob"), base64: z.string() }),
+]);
+
+export const columnAssignmentSchema = z.object({
+  column: z.string(),
+  value: writeValueSchema,
+});
+
+export const enableWriting = defineRpc({
+  name: "sqlite.write.enable",
+  input: z.object({ handleId: z.string(), enabled: z.boolean() }),
+  output: z.object({
+    readOnly: z.boolean(),
+    warning: z.string().nullable(),
   }),
 });
+
+export const insertRow = defineRpc({
+  name: "sqlite.row.insert",
+  input: z.object({ handleId: z.string(), object: z.string(), values: z.array(columnAssignmentSchema).min(1) }),
+  output: z.object({ insertedKeys: z.array(z.array(keyValueSchema)), changes: z.number() }),
+});
+
+export const updateRow = defineRpc({
+  name: "sqlite.row.update",
+  input: z.object({
+    handleId: z.string(),
+    object: z.string(),
+    key: z.array(keyValueSchema),
+    changes: z.array(columnAssignmentSchema).min(1),
+  }),
+  output: z.object({ changes: z.number() }),
+});
+
+export const deleteRow = defineRpc({
+  name: "sqlite.row.delete",
+  input: z.object({ handleId: z.string(), object: z.string(), key: z.array(keyValueSchema) }),
+  output: z.object({ changes: z.number() }),
+});
+
+export const exportFormatSchema = z.enum(["csv", "tsv", "json", "jsonl", "markdown", "sql", "html"]);
+
+export const jobKindSchema = z.enum(["sql", "export"]);
+export const jobStateSchema = z.enum(["running", "done", "failed", "cancelled"]);
+
+export const jobStartInputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("sql"),
+    handleId: z.string(),
+    sql: z.string().min(1).max(100_000),
+    limit: z.number().int().min(1).max(5000),
+  }),
+  z.object({
+    kind: z.literal("export"),
+    handleId: z.string(),
+    /** The object to read, or a full `select` when `sql` is set. */
+    object: z.string(),
+    sql: z.string().max(100_000).nullish(),
+    format: exportFormatSchema,
+    /** Absolute path on the daemon host. */
+    targetPath: z.string().min(1),
+    overwrite: z.boolean().nullish(),
+    columns: z.array(z.string()).nullish(),
+    sort: z.array(sortSchema).nullish(),
+    filters: z.array(filterSchema).nullish(),
+    search: z.string().nullish(),
+  }),
+]);
+
+export const jobResultSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("sql"),
+    result: rowQueryResultSchema,
+    /** Rows changed by a statement that returns none; null for a select. */
+    changes: z.number().nullable(),
+    /** The row budget or the time budget stopped the scan early. */
+    budgetExceeded: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("export"),
+    path: z.string(),
+    bytes: z.number(),
+    rows: z.number(),
+    truncated: z.boolean(),
+  }),
+]);
+
+export const jobStatusSchema = z.object({
+  jobId: z.string(),
+  kind: jobKindSchema,
+  state: jobStateSchema,
+  startedAt: z.number(),
+  elapsedMs: z.number(),
+  result: jobResultSchema.nullable(),
+  error: z.string().nullable(),
+});
+
+export const startJob = defineRpc({
+  name: "sqlite.job.start",
+  input: jobStartInputSchema,
+  output: z.object({ jobId: z.string() }),
+});
+
+export const pollJob = defineRpc({
+  name: "sqlite.job.poll",
+  input: z.object({ jobId: z.string() }),
+  output: jobStatusSchema,
+});
+
+export const cancelJob = defineRpc({
+  name: "sqlite.job.cancel",
+  input: z.object({ jobId: z.string() }),
+  output: z.object({ cancelled: z.boolean() }),
+});
+

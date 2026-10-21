@@ -16,5 +16,9 @@ export const viewerSettings = defineSettings({
     lastDirectory: z.string().default(""),
     /** Skip the confirmation when a locked database falls back to a snapshot. */
     snapshotWithoutAsking: z.boolean().default(false),
+    /** Statements typed in the SQL console, newest first. */
+    sqlHistory: z.array(z.string()).default([]),
+    /** Databases the user allowed editing on, by path. */
+    writablePaths: z.array(z.string()).default([]),
   }),
 });

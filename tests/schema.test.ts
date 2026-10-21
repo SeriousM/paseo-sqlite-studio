@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  affinityOf,
   countRows,
   describeColumns,
   hasRowId,
@@ -14,6 +13,7 @@ import {
   objectKind,
   primaryKeyColumns,
 } from "../server/schema";
+import { affinityOf } from "../shared/cell-encoding";
 
 const FIXTURE = `
   create table users(

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
 import type { columnSchema, indexSchema, objectSummarySchema, foreignKeySchema, objectKindSchema } from "../shared/contracts";
+import { affinityOf } from "../shared/cell-encoding";
 
 type Column = z.infer<typeof columnSchema>;
 type IndexInfo = z.infer<typeof indexSchema>;
@@ -18,16 +19,6 @@ interface TableListRow {
 
 export function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
-}
-
-/** SQLite's affinity rules, applied to a declared type. */
-export function affinityOf(declaredType: string): Column["affinity"] {
-  const upper = declaredType.toUpperCase();
-  if (upper.includes("INT")) return "integer";
-  if (upper.includes("CHAR") || upper.includes("CLOB") || upper.includes("TEXT")) return "text";
-  if (upper.includes("BLOB") || upper.length === 0) return "blob";
-  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return "real";
-  return "numeric";
 }
 
 function readTableList(db: DatabaseSync): Map<string, TableListRow> {
@@ -127,7 +118,7 @@ export function describeColumns(db: DatabaseSync, name: string): ColumnDetail {
   const columns: Column[] = rows.map((row) => ({
     name: row.name,
     declaredType: row.type,
-    affinity: affinityOf(row.type),
+    affinity: affinityOf(row.type) as Column["affinity"],
     notNull: row.notnull === 1,
     defaultValue: row.dflt_value,
     primaryKeyPosition: row.pk,

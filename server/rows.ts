@@ -2,7 +2,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import type { z } from "zod";
 import type { Cell, columnSchema, filterSchema, rowQueryResultSchema, sortSchema, keyValueSchema } from "../shared/contracts";
 import { describeColumns, hasRowId, primaryKeyColumns, quoteIdentifier } from "./schema";
-import { bindValue, encodeCell, encodeKey } from "./values";
+import { bindValue, encodeCell, encodeKey } from "../shared/cell-encoding";
 
 type RowQueryResult = z.infer<typeof rowQueryResultSchema>;
 type Column = z.infer<typeof columnSchema>;
@@ -110,7 +110,7 @@ function keysetClause(identity: Identity, sort: readonly Sort[], cursor: readonl
   return `(${left}) > (${right})`;
 }
 
-function filterConditions(spec: RowQuerySpec, columns: readonly Column[]): { conditions: string[]; params: unknown[] } {
+export function buildConditions(spec: Pick<RowQuerySpec, "filters" | "search">, columns: readonly Column[]): { conditions: string[]; params: unknown[] } {
   const available = new Set(columns.map((column) => column.name));
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -137,15 +137,31 @@ function filterConditions(spec: RowQuerySpec, columns: readonly Column[]): { con
   return { conditions, params };
 }
 
+/** ORDER BY clauses for a request, using only columns that exist. */
+export function buildOrder(
+  spec: Pick<RowQuerySpec, "sort">,
+  columns: readonly Column[],
+  identity?: readonly string[],
+): string[] {
+  const order: string[] = [];
+  for (const entry of spec.sort ?? []) {
+    if (!columns.some((column) => column.name === entry.column)) continue;
+    order.push(`${quoteIdentifier(entry.column)} ${entry.direction}`);
+  }
+  for (const column of identity ?? []) {
+    if ((spec.sort ?? []).some((entry) => entry.column === column)) continue;
+    order.push(`${quoteIdentifier(column)} asc`);
+  }
+  return order;
+}
+
 export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery {
   const detail = describeColumns(db, spec.object);
   const identity = resolveIdentity(db, spec.object);
-  const { conditions, params } = filterConditions(spec, detail.columns);
+  const { conditions, params } = buildConditions(spec, detail.columns);
 
-  const sort = (spec.sort ?? []).filter((entry) =>
-    detail.columns.some((column) => column.name === entry.column),
-  );
   const cursor = spec.cursor ?? null;
+  const sort = (spec.sort ?? []).filter((entry) => detail.columns.some((column) => column.name === entry.column));
   const keyset = identity && cursor ? keysetClause(identity, sort, cursor) : null;
   if (keyset) {
     conditions.push(keyset);
@@ -167,14 +183,7 @@ export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery 
   if (identity?.usesRowId) projection.unshift(`rowid as ${quoteIdentifier(ROWID_ALIAS)}`);
 
   // An explicit sort wins; the identity only breaks ties so paging stays stable.
-  const orderBy: string[] = [];
-  for (const entry of sort) {
-    orderBy.push(`${quoteIdentifier(entry.column)} ${entry.direction}`);
-  }
-  for (const column of identity?.orderColumns ?? []) {
-    if (sort.some((entry) => entry.column === column)) continue;
-    orderBy.push(`${quoteIdentifier(column)} asc`);
-  }
+  const orderBy = buildOrder({ sort }, detail.columns, identity?.orderColumns ?? []);
 
   let sql = `select ${projection.length > 0 ? projection.join(", ") : "*"} from ${quoteIdentifier(spec.object)}`;
   if (conditions.length > 0) sql += ` where ${conditions.join(" and ")}`;
@@ -191,7 +200,7 @@ function applyStatementOptions(statement: StatementSync): void {
 
 function countRows(db: DatabaseSync, spec: RowQuerySpec): number {
   const detail = describeColumns(db, spec.object);
-  const { conditions, params } = filterConditions(spec, detail.columns);
+  const { conditions, params } = buildConditions(spec, detail.columns);
   let sql = `select count(*) as c from ${quoteIdentifier(spec.object)}`;
   if (conditions.length > 0) sql += ` where ${conditions.join(" and ")}`;
   const statement = db.prepare(sql);
@@ -231,70 +240,5 @@ export function runRowQuery(db: DatabaseSync, spec: RowQuerySpec): RowQueryResul
         : null,
     elapsedMs: Date.now() - started,
     sql: query.sql,
-  };
-}
-
-export interface SqlRunResult extends RowQueryResult {
-  returnedRows: boolean;
-  changes: number | null;
-}
-
-export function runSql(db: DatabaseSync, sql: string, limit: number): SqlRunResult {
-  const started = Date.now();
-  const statement = db.prepare(sql);
-  applyStatementOptions(statement);
-  const declaredColumns =
-    typeof statement.columns === "function"
-      ? (statement.columns() as Array<{ name: string | null; type: string | null }>).filter(
-          (column) => column.name !== null,
-        )
-      : [];
-  const returnsRows = declaredColumns.length > 0 || /^\s*(select|with|pragma|explain|values)\b/i.test(sql);
-
-  if (!returnsRows) {
-    const result = statement.run() as { changes?: number | bigint };
-    return {
-      columns: [],
-      rows: [],
-      keys: [],
-      hasMore: false,
-      rowCount: null,
-      nextCursor: null,
-      elapsedMs: Date.now() - started,
-      sql,
-      returnedRows: false,
-      changes: result.changes === undefined ? null : Number(result.changes),
-    };
-  }
-
-  const rows: Cell[][] = [];
-  const keys: KeyValue[][] = [];
-  let names: string[] = declaredColumns.map((column) => column.name ?? "?");
-  let hasMore = false;
-  for (const row of statement.iterate() as IterableIterator<Record<string, unknown>>) {
-    if (rows.length >= limit) {
-      hasMore = true;
-      break;
-    }
-    if (names.length === 0) names = Object.keys(row);
-    rows.push(names.map((name) => encodeCell(row[name])));
-    keys.push([]);
-  }
-
-  return {
-    columns: names.map((name) => ({
-      name,
-      declaredType: declaredColumns.find((column) => column.name === name)?.type ?? "",
-      affinity: "blob" as const,
-    })),
-    rows,
-    keys,
-    hasMore,
-    rowCount: null,
-    nextCursor: null,
-    elapsedMs: Date.now() - started,
-    sql,
-    returnedRows: true,
-    changes: null,
   };
 }

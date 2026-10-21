@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { KeyValue } from "../shared/contracts";
-import { buildRowQuery, runRowQuery, runSql } from "../server/rows";
-import { encodeCell, encodeKey } from "../server/values";
+import { buildRowQuery, runRowQuery } from "../server/rows";
+import { encodeCell, encodeKey } from "../shared/cell-encoding";
 
 const directories: string[] = [];
 const databases: DatabaseSync[] = [];
@@ -114,7 +114,7 @@ describe("runRowQuery", () => {
     expect(page.rows).toHaveLength(10);
     expect(page.hasMore).toBe(true);
     expect(page.nextCursor).toEqual([10]);
-    expect(page.columns.map((column) => column.name)).toEqual(["id", "name", "quantity", "price", "note", "payload"]);
+    expect(page.columns.map((column: { name: string }) => column.name)).toEqual(["id", "name", "quantity", "price", "note", "payload"]);
     expect(page.rows[0]?.[1]).toBe("item-001");
     db.close();
   });
@@ -172,7 +172,7 @@ describe("runRowQuery", () => {
   it("limits the requested columns but keeps the row identity", () => {
     const db = fixtureDatabase();
     const page = runRowQuery(db, { object: "items", limit: 2, columns: ["name"] });
-    expect(page.columns.map((column) => column.name)).toEqual(["name"]);
+    expect(page.columns.map((column: { name: string }) => column.name)).toEqual(["name"]);
     expect(page.keys).toEqual([[1], [2]]);
     db.close();
   });
@@ -189,35 +189,6 @@ describe("runRowQuery", () => {
     const db = fixtureDatabase();
     expect(runRowQuery(db, { object: "items", limit: 5 }).rowCount).toBeNull();
     expect(runRowQuery(db, { object: "items", limit: 5, countExact: true }).rowCount).toBe(500);
-    db.close();
-  });
-});
-
-describe("runSql", () => {
-  it("runs a select and caps the result", () => {
-    const db = fixtureDatabase();
-    const result = runSql(db, "select id, name from items order by id", 5);
-    expect(result.returnedRows).toBe(true);
-    expect(result.rows).toHaveLength(5);
-    expect(result.hasMore).toBe(true);
-    expect(result.columns.map((column) => column.name)).toEqual(["id", "name"]);
-    db.close();
-  });
-
-  it("reports changes for a statement that returns no rows", () => {
-    const directory = mkdtempSync(join(tmpdir(), "paseo-sqlite-write-"));
-    directories.push(directory);
-    const db = new DatabaseSync(join(directory, "write.db"));
-    db.exec("create table t(a integer); insert into t values (1), (2)");
-    const result = runSql(db, "update t set a = a + 1", 10);
-    expect(result.returnedRows).toBe(false);
-    expect(result.changes).toBe(2);
-    db.close();
-  });
-
-  it("surfaces SQL errors", () => {
-    const db = fixtureDatabase();
-    expect(() => runSql(db, "select * from missing", 10)).toThrow(/no such table/i);
     db.close();
   });
 });
