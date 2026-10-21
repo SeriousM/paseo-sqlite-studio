@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+coverage/
+dist/
+*.tgz
+# Local scratch databases used for manual checks; never commit user data.
+scratch/
