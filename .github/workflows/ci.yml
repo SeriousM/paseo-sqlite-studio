@@ -18,6 +18,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Check the listing images decode and differ
+        run: node tools/check-media.mjs assets
       - name: Check both runtime bundles compile
         run: |
           npx --yes esbuild@0.28.1 index.client.tsx --bundle --format=cjs --platform=neutral --target=es2020 \
