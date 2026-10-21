@@ -45,6 +45,5 @@
     "type": "git",
     "url": "git+https://github.com/SeriousM/paseo-sqlite-studio.git"
   },
-  "homepage": "https://github.com/SeriousM/paseo-sqlite-studio",
-  "packageManager": "pnpm@12.6.0"
+  "homepage": "https://github.com/SeriousM/paseo-sqlite-studio"
 }
