@@ -1,4 +1,4 @@
-# SQLite viewer
+# SQLite Studio
 
 Browse and edit SQLite databases inside Paseo. Open a database from the SQLite screen, or from the
 file viewer once the app supports plugin file panels, and work with it the way a desktop database

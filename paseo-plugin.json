@@ -1,6 +1,6 @@
 {
-  "id": "paseo-sqlite",
-  "name": "SQLite viewer",
+  "id": "paseo-sqlite-studio",
+  "name": "SQLite Studio",
   "description": "Browses and edits SQLite databases on the daemon that owns them",
   "media": [
     "assets/screenshot-data.png",

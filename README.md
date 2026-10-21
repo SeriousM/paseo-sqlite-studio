@@ -1,4 +1,4 @@
-# SQLite viewer for Paseo
+# SQLite Studio for Paseo
 
 Open a SQLite database inside Paseo: browse its structure, page through rows, run SQL, and edit rows
 when you turn editing on. The database is read where it lives, so this works the same on a local
@@ -43,7 +43,7 @@ the plugin thread and the worker by embedding the same encoder into both.
 ## Install
 
 ```sh
-paseo plugin add git:owner/paseo-sqlite
+paseo plugin add git:SeriousM/paseo-sqlite-studio
 ```
 
 Or from a local checkout:
@@ -71,7 +71,7 @@ pnpm install
 pnpm typecheck
 pnpm test
 node tools/make-fixtures.mjs scratch   # sample databases for manual checks
-paseo plugin reload paseo-sqlite
+paseo plugin reload paseo-sqlite-studio
 ```
 
 `scratch/` holds generated databases and screenshots and is not committed.
