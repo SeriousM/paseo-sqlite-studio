@@ -108,6 +108,7 @@ export function SqliteScreen({ theme, layout, host, params }: PluginScreenProps)
         theme={theme}
         layout={layout}
         hostId={host.id}
+        hostLabel={host.label}
         handleId={database.handleId}
         database={database}
         pageSize={pageSize}
@@ -124,6 +125,7 @@ export function SqliteScreen({ theme, layout, host, params }: PluginScreenProps)
       <OpenPanel
         theme={theme}
         layout={layout}
+        hostLabel={host.label}
         recents={recents}
         path={path}
         onPathChange={setPath}

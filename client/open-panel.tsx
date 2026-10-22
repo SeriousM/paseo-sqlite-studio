@@ -11,6 +11,8 @@ import type { ViewerHost } from "./types";
  * needs local filesystem access of its own.
  */
 export interface OpenPanelProps extends ViewerHost {
+  /** Which daemon these paths live on; two hosts can be connected at once. */
+  hostLabel: string;
   recents: string[];
   path: string;
   onPathChange: (path: string) => void;
@@ -28,6 +30,7 @@ export interface OpenPanelProps extends ViewerHost {
 export function OpenPanel({
   theme,
   layout,
+  hostLabel,
   recents,
   path,
   onPathChange,
@@ -45,6 +48,7 @@ export function OpenPanel({
     () => ({
       root: { flex: 1, backgroundColor: theme.colors.surface0 },
       content: { padding: layout.compact ? 12 : 16, gap: 10 },
+      hostLine: { color: theme.colors.foregroundMuted, fontSize: 12 },
       title: { color: theme.colors.foreground, fontSize: 16, fontWeight: "600" as const },
       row: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
       input: {
@@ -112,6 +116,7 @@ export function OpenPanel({
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Open a SQLite database</Text>
+        <Text style={styles.hostLine}>on {hostLabel}</Text>
 
         <View style={styles.row}>
           <TextInput

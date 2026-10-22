@@ -23,6 +23,7 @@ import {
   openDatabase,
   readCell,
   readObject,
+  readStats,
   pollJob,
   readRows,
   readSchema,
@@ -45,6 +46,7 @@ export type ColumnMeta = ObjectDetail["columns"][number];
 export type DirectoryListing = RpcOutput<typeof listDirectory>;
 export type CellValue = RpcOutput<typeof readCell>;
 export type DatabaseInfo = OpenedDatabase["info"];
+export type ColumnStats = RpcOutput<typeof readStats>;
 export type JobStatus = RpcOutput<typeof pollJob>;
 export type JobResult = NonNullable<JobStatus["result"]>;
 export type JobRequest = RpcInput<typeof startJob>;
@@ -245,5 +247,27 @@ export function useDeleteRow() {
       key: KeyValue[];
       expected?: ColumnAssignment[];
     }) => remove(input),
+  });
+}
+
+/** Aggregates for one column over the current filters, computed on the daemon. */
+export function useColumnStats(
+  hostId: string,
+  handleId: string,
+  request: { object: string; column: string; filters: Filter[]; search: string },
+  enabled: boolean,
+) {
+  const stats = useRpc(readStats);
+  return useQuery({
+    queryKey: ["sqlite", hostId, "stats", handleId, request],
+    enabled: enabled && handleId.length > 0 && request.column.length > 0 && request.object.length > 0,
+    queryFn: () =>
+      stats({
+        handleId,
+        object: request.object,
+        column: request.column,
+        filters: request.filters,
+        search: request.search,
+      }),
   });
 }

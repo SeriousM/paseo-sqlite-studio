@@ -78,6 +78,7 @@ export function SqliteFilePanel({ theme, layout, host, file, pageSize }: SqliteF
         theme={theme}
         layout={layout}
         hostId={host.id}
+        hostLabel={host.label}
         handleId={database.handleId}
         database={database}
         pageSize={pageSize ?? 200}

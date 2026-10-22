@@ -15,6 +15,7 @@ import {
   type OpenedDatabase,
 } from "./api";
 import { CellDetail } from "./cell-detail";
+import { ColumnStats } from "./column-stats";
 import { DataGrid, type CellTarget, type GridColumn } from "./data-grid";
 import { ExportDialog } from "./export-dialog";
 import { RowEditor } from "./row-editor";
@@ -27,6 +28,8 @@ import type { ViewerHost } from "./types";
 export interface DatabaseViewProps extends ViewerHost {
   /** Identifies the daemon this database lives on; every query key includes it. */
   hostId: string;
+  /** Shown in the header so the user can tell two servers apart. */
+  hostLabel: string;
   handleId: string;
   database: OpenedDatabase;
   pageSize: number;
@@ -46,7 +49,7 @@ function directoryOf(path: string): string {
   return separator > 0 ? path.slice(0, separator) : path;
 }
 
-export function DatabaseView({ theme, layout, hostId, handleId, database, pageSize, onClose }: DatabaseViewProps) {
+export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, database, pageSize, onClose }: DatabaseViewProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("data");
   // Compact clients toggle between the object list and the content; they start on the list.
@@ -59,6 +62,7 @@ export function DatabaseView({ theme, layout, hostId, handleId, database, pageSi
   const [consentOpen, setConsentOpen] = useState(false);
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const schema = useSchema(hostId, handleId);
@@ -231,6 +235,7 @@ export function DatabaseView({ theme, layout, hostId, handleId, database, pageSi
         </Text>
         <View style={styles.badgeRow}>
           <Text style={writable ? styles.badgeDanger : styles.badge}>{writable ? "writable" : "read-only"}</Text>
+          <Text style={styles.badge}>{hostLabel}</Text>
           <Text style={styles.badge}>{database.info.journalMode}</Text>
           <Text style={styles.badge}>{database.info.pageSize} B pages</Text>
           {database.snapshotPath !== null ? <Text style={styles.badgeWarning}>snapshot copy</Text> : null}
@@ -322,6 +327,7 @@ export function DatabaseView({ theme, layout, hostId, handleId, database, pageSi
                     : undefined
                 }
                 onExport={() => setExportOpen(true)}
+                onStats={() => setStatsOpen(true)}
               />
             )}
           </View>
@@ -367,6 +373,20 @@ export function DatabaseView({ theme, layout, hostId, handleId, database, pageSi
         search={search}
         onClose={() => setExportOpen(false)}
         open={exportOpen}
+      />
+
+      <ColumnStats
+        open={statsOpen}
+        theme={theme}
+        layout={layout}
+        hostId={hostId}
+        hostLabel={hostLabel}
+        handleId={handleId}
+        object={selected ?? ""}
+        columns={visibleColumns}
+        filters={filters}
+        search={search}
+        onClose={() => setStatsOpen(false)}
       />
 
       <Modal

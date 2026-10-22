@@ -242,6 +242,33 @@ export const readRows = defineRpc({
   output: rowQueryResultSchema,
 });
 
+export const columnStatsSchema = z.object({
+  column: z.string(),
+  /** Rows matching the current filters. */
+  rows: z.number(),
+  /** Non-null values in that column. */
+  values: z.number(),
+  nulls: z.number(),
+  /** True when the column's affinity makes sum and average meaningful. */
+  numeric: z.boolean(),
+  sum: z.number().nullable(),
+  average: z.number().nullable(),
+  min: cellSchema.nullable(),
+  max: cellSchema.nullable(),
+});
+
+export const readStats = defineRpc({
+  name: "sqlite.stats",
+  input: z.object({
+    handleId: z.string(),
+    object: z.string(),
+    column: z.string(),
+    filters: z.array(filterSchema).nullish(),
+    search: z.string().nullish(),
+  }),
+  output: columnStatsSchema,
+});
+
 export const readCell = defineRpc({
   name: "sqlite.cell",
   input: z.object({

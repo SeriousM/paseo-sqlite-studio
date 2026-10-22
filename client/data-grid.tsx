@@ -41,6 +41,7 @@ export interface DataGridProps extends ViewerHost {
   onInsertRow?: (() => void) | undefined;
   onEditRow?: ((target: CellTarget) => void) | undefined;
   onExport?: (() => void) | undefined;
+  onStats?: (() => void) | undefined;
 }
 
 const ROW_HEIGHT = 32;
@@ -72,6 +73,7 @@ export function DataGrid({
   onInsertRow,
   onEditRow,
   onExport,
+  onStats,
 }: DataGridProps) {
   const [query, setQuery] = useState("");
   const [countExact, setCountExact] = useState(false);
@@ -300,6 +302,11 @@ export function DataGrid({
         {onInsertRow ? (
           <Pressable accessibilityRole="button" style={styles.button} onPress={onInsertRow}>
             <Text style={styles.buttonText}>Add row</Text>
+          </Pressable>
+        ) : null}
+        {onStats ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Column statistics" style={styles.button} onPress={onStats}>
+            <Text style={styles.buttonText}>Stats</Text>
           </Pressable>
         ) : null}
         {onExport ? (

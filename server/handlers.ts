@@ -2,13 +2,14 @@ import { readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
+import type { Cell, Filter } from "../shared/contracts";
 import type { jobStartInputSchema } from "../shared/contracts";
 
 type JobRequest = z.infer<typeof jobStartInputSchema>;
 import type { keyValueSchema } from "../shared/contracts";
 import { classifySqliteError, readDatabaseInfo, type SqliteEngine } from "./engine";
 import type { JobRegistry } from "./jobs";
-import { assembleRowQuery, buildCountQuery, buildRowQuery, type RowQuerySpec } from "./rows";
+import { assembleRowQuery, buildConditions, buildCountQuery, buildRowQuery, type RowQuerySpec } from "./rows";
 import { runQueriesInWorker } from "./sql-worker";
 import {
   describeColumns,
@@ -298,4 +299,84 @@ export function deleteRowIn(
   } catch (error) {
     throw readableError(error);
   }
+}
+
+/**
+ * Aggregates for one column over the whole filtered set, not just the loaded page:
+ * a total over 200 visible rows would quietly lie about the data.
+ */
+export async function readStatsOf(
+  engine: SqliteEngine,
+  input: {
+    handleId: string;
+    object: string;
+    column: string;
+    filters?: readonly Filter[] | null;
+    search?: string | null;
+  },
+) {
+  const entry = engine.get(input.handleId);
+  const detail = describeColumns(entry.db, input.object);
+  const column = detail.columns.find((candidate) => candidate.name === input.column);
+  if (!column) throw new Error(`Unknown column: ${input.column}`);
+  const numeric = column.affinity === "integer" || column.affinity === "real" || column.affinity === "numeric";
+  const where = buildConditions(input, detail.columns);
+  const quoted = quoteIdentifier(column.name);
+  const projection = [
+    "count(*) as total_rows",
+    `count(${quoted}) as non_null`,
+    numeric ? `sum(${quoted}) as sum_value` : "null as sum_value",
+    numeric ? `avg(${quoted}) as avg_value` : "null as avg_value",
+    `min(${quoted}) as min_value`,
+    `max(${quoted}) as max_value`,
+  ];
+  const sql = [
+    `select ${projection.join(", ")} from ${quoteIdentifier(input.object)}`,
+    where.conditions.length > 0 ? ` where ${where.conditions.join(" and ")}` : "",
+  ].join("");
+  const run = runQueriesInWorker({
+    path: entry.snapshotPath ?? entry.path,
+    queries: [
+      {
+        id: "stats",
+        sql,
+        params: where.params,
+        limit: null,
+        rowColumns: ["total_rows", "non_null", "sum_value", "avg_value", "min_value", "max_value"],
+        keyColumns: [],
+        budgetMs: ROW_BUDGET_MS,
+      },
+    ],
+    ceilingMs: ROW_CEILING_MS,
+  });
+  let results;
+  try {
+    results = await run.result;
+  } catch (error) {
+    throw readableError(error);
+  }
+  const row: (Cell | undefined)[] | undefined = results.stats?.rows[0];
+  if (!row) throw new Error("The statistics query returned no result.");
+  const rows = numberFromCell(row[0]);
+  const values = numberFromCell(row[1]);
+  return {
+    column: column.name,
+    rows,
+    values,
+    nulls: Math.max(0, rows - values),
+    numeric,
+    sum: numeric ? numberFromCell(row[2]) : null,
+    average: numeric ? numberFromCell(row[3]) : null,
+    min: row[4] ?? null,
+    max: row[5] ?? null,
+  };
+}
+
+function numberFromCell(cell: unknown): number {
+  if (typeof cell === "number") return cell;
+  if (typeof cell === "object" && cell !== null && "kind" in cell) {
+    const tagged = cell as { kind: string; value?: string };
+    if (tagged.kind === "bigint" && typeof tagged.value === "string") return Number(tagged.value);
+  }
+  return 0;
 }
