@@ -42,6 +42,8 @@ export interface DataGridProps extends ViewerHost {
   onEditRow?: ((target: CellTarget) => void) | undefined;
   onExport?: (() => void) | undefined;
   onStats?: (() => void) | undefined;
+  /** Width overrides by column name, from the host settings. */
+  widthOverrides?: Record<string, number> | undefined;
 }
 
 const ROW_HEIGHT = 32;
@@ -74,6 +76,7 @@ export function DataGrid({
   onEditRow,
   onExport,
   onStats,
+  widthOverrides,
 }: DataGridProps) {
   const [query, setQuery] = useState("");
   const [countExact, setCountExact] = useState(false);
@@ -224,7 +227,10 @@ export function DataGrid({
     return styles.cellText;
   };
 
-  const widths = useMemo(() => columns.map((column) => columnWidth(column)), [columns]);
+  const widths = useMemo(
+    () => columns.map((column) => widthOverrides?.[column.name] ?? columnWidth(column)),
+    [columns, widthOverrides],
+  );
   const totalWidth = widths.reduce((sum, width) => sum + width, GUTTER_WIDTH);
   const sortDirection = (column: string) => sort.find((entry) => entry.column === column)?.direction ?? null;
 

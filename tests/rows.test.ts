@@ -140,6 +140,59 @@ describe("readRowsOf", () => {
     expect(secondIds.some((id) => firstIds.includes(id))).toBe(false);
   });
 
+  it("pages by key when sorting the identity descending", async () => {
+    const { engine, handleId } = await fixture();
+    const first = await readRowsOf(engine, {
+      handleId,
+      object: "items",
+      limit: 10,
+      sort: [{ column: "id", direction: "desc" }],
+    });
+    expect(first.rows.map((row) => row[0])).toEqual([500, 499, 498, 497, 496, 495, 494, 493, 492, 491]);
+    expect(first.nextCursor).toEqual([491]);
+    const second = await readRowsOf(engine, {
+      handleId,
+      object: "items",
+      limit: 10,
+      sort: [{ column: "id", direction: "desc" }],
+      cursor: first.nextCursor,
+    });
+    expect(second.rows[0]?.[0]).toBe(490);
+    expect(second.rows.some((row) => first.rows.some((seen) => seen[0] === row[0]))).toBe(false);
+  });
+
+  it("pages by key when sorting a unique column", async () => {
+    const { engine, handleId } = await fixture();
+    const first = await readRowsOf(engine, {
+      handleId,
+      object: "keyed",
+      limit: 1,
+      sort: [{ column: "code", direction: "asc" }],
+    });
+    expect(first.rows.map((row) => row[0])).toEqual(["a"]);
+    expect(first.nextCursor).toEqual(["a"]);
+    const second = await readRowsOf(engine, {
+      handleId,
+      object: "keyed",
+      limit: 1,
+      sort: [{ column: "code", direction: "asc" }],
+      cursor: first.nextCursor,
+    });
+    expect(second.rows.map((row) => row[0])).toEqual(["b"]);
+  });
+
+  it("falls back to offset paging when the sort column allows duplicates", async () => {
+    const { engine, handleId } = await fixture();
+    const page = await readRowsOf(engine, {
+      handleId,
+      object: "items",
+      limit: 5,
+      sort: [{ column: "quantity", direction: "asc" }],
+    });
+    // quantity repeats across rows, so a key cursor would skip values.
+    expect(page.nextCursor).toBeNull();
+  });
+
   it("pages with an offset when a cursor is not supplied", async () => {
     const { engine, handleId } = await fixture();
     const page = await readRowsOf(engine, { handleId, object: "items", limit: 5, offset: 495 });

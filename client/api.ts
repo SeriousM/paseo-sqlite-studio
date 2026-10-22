@@ -24,6 +24,7 @@ import {
   readCell,
   readObject,
   readStats,
+  saveBlob,
   pollJob,
   readRows,
   readSchema,
@@ -269,5 +270,19 @@ export function useColumnStats(
         filters: request.filters,
         search: request.search,
       }),
+  });
+}
+
+export function useSaveBlob() {
+  const save = useRpc(saveBlob);
+  return useMutation({
+    mutationFn: (input: {
+      handleId: string;
+      object: string;
+      column: string;
+      key: KeyValue[];
+      targetPath: string;
+      overwrite?: boolean;
+    }) => save(input),
   });
 }

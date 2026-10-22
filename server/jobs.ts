@@ -124,6 +124,7 @@ export class JobRegistry {
           limit: request.limit,
           rowColumns: [],
           keyColumns: [],
+          cursorColumns: [],
           budgetMs: WORKER_TIME_BUDGET_MS,
         },
       ],

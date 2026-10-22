@@ -5,7 +5,7 @@ import { describeColumns, hasRowId, primaryKeyColumns, quoteIdentifier } from ".
 import { bindValue } from "../shared/cell-encoding";
 import type { WorkerQueryResult } from "./sql-worker";
 
-type WorkerRows = Pick<WorkerQueryResult, "rows" | "keys" | "elapsedMs">;
+type WorkerRows = Pick<WorkerQueryResult, "rows" | "keys" | "cursors" | "elapsedMs">;
 
 type RowQueryResult = z.infer<typeof rowQueryResultSchema>;
 type Column = z.infer<typeof columnSchema>;
@@ -30,6 +30,8 @@ export interface BuiltQuery {
   params: unknown[];
   identity: Identity | null;
   displayNames: string[];
+  /** Columns whose values form the next page's cursor; empty when paging by offset. */
+  cursorColumns: string[];
   columns: Column[];
 }
 
@@ -95,22 +97,53 @@ function resolveIdentity(db: DatabaseSync, object: string): Identity | null {
     : null;
 }
 
-/** Key-ordered paging only applies when the page order already follows the identity. */
-function keysetClause(identity: Identity, sort: readonly Sort[], cursor: readonly KeyValue[]): string | null {
-  if (cursor.length !== identity.orderColumns.length) return null;
-  const orderedByIdentity =
-    sort.length === 0 ||
-    (sort.length === identity.orderColumns.length &&
-      sort.every(
-        (entry, index) => entry.column === identity.orderColumns[index] && entry.direction === "asc",
-      ));
-  if (!orderedByIdentity) return null;
-  if (identity.orderColumns.length === 1) {
-    return `${quoteIdentifier(identity.orderColumns[0] ?? "rowid")} > ?`;
+/**
+ * Columns that can serve as the next page's cursor. Key-ordered paging works whenever
+ * the page order is strictly increasing: the row identity in either direction, or a
+ * single unique, non-null column. Everything else falls back to OFFSET, which is
+ * slower but always correct.
+ */
+function keysetColumns(
+  identity: Identity | null,
+  sort: readonly Sort[],
+  columns: readonly Column[],
+): string[] {
+  if (sort.length === 0) return identity?.readColumns ?? [];
+  if (sort.length !== 1) return [];
+  const entry = sort[0];
+  if (!entry) return [];
+  const isIdentity = identity !== null && identity.orderColumns.length === 1 && identity.orderColumns[0] === entry.column;
+  const column = columns.find((candidate) => candidate.name === entry.column);
+  // An INTEGER PRIMARY KEY aliases the rowid, so it is the identity even though
+  // `table_xinfo` reports it as nullable.
+  const primaryKey = columns.filter((candidate) => candidate.primaryKeyPosition > 0);
+  const isRowIdAlias =
+    identity?.usesRowId === true && primaryKey.length === 1 && primaryKey[0]?.name === entry.column;
+  // Duplicates would make `>` skip rows, and NULLs would make it skip them all.
+  return isIdentity || isRowIdAlias || (column !== undefined && column.unique && column.notNull)
+    ? [entry.column]
+    : [];
+}
+
+function cursorClause(
+  identity: Identity | null,
+  sort: readonly Sort[],
+  columns: readonly Column[],
+  cursor: readonly KeyValue[],
+): string | null {
+  const eligible = keysetColumns(identity, sort, columns);
+  if (eligible.length === 0 || cursor.length !== eligible.length) return null;
+  if (sort.length === 0 && identity) {
+    if (identity.orderColumns.length === 1) {
+      return `${quoteIdentifier(identity.orderColumns[0] ?? "rowid")} > ?`;
+    }
+    const left = identity.orderColumns.map(quoteIdentifier).join(", ");
+    const right = identity.orderColumns.map(() => "?").join(", ");
+    return `(${left}) > (${right})`;
   }
-  const left = identity.orderColumns.map(quoteIdentifier).join(", ");
-  const right = identity.orderColumns.map(() => "?").join(", ");
-  return `(${left}) > (${right})`;
+  const entry = sort[0];
+  if (!entry) return null;
+  return `${quoteIdentifier(entry.column)} ${entry.direction === "asc" ? ">" : "<"} ?`;
 }
 
 export function buildConditions(spec: Pick<RowQuerySpec, "filters" | "search">, columns: readonly Column[]): { conditions: string[]; params: unknown[] } {
@@ -165,9 +198,10 @@ export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery 
 
   const cursor = spec.cursor ?? null;
   const sort = (spec.sort ?? []).filter((entry) => detail.columns.some((column) => column.name === entry.column));
-  const keyset = identity && cursor ? keysetClause(identity, sort, cursor) : null;
-  if (keyset) {
-    conditions.push(keyset);
+  const cursorColumns = keysetColumns(identity, sort, detail.columns);
+  const clause = cursor ? cursorClause(identity, sort, detail.columns, cursor) : null;
+  if (clause) {
+    conditions.push(clause);
     for (const value of cursor ?? []) params.push(bindValue(value));
   }
 
@@ -192,9 +226,16 @@ export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery 
   if (conditions.length > 0) sql += ` where ${conditions.join(" and ")}`;
   if (orderBy.length > 0) sql += ` order by ${orderBy.join(", ")}`;
   sql += ` limit ${spec.limit}`;
-  if (!keyset && spec.offset && spec.offset > 0) sql += ` offset ${Math.floor(spec.offset)}`;
+  if (!clause && spec.offset && spec.offset > 0) sql += ` offset ${Math.floor(spec.offset)}`;
 
-  return { sql, params, identity, displayNames, columns: detail.columns };
+  return {
+    sql,
+    params,
+    identity,
+    displayNames,
+    cursorColumns,
+    columns: detail.columns,
+  };
 }
 
 /** The count runs in the worker too, because counting a large table is a full scan. */
@@ -217,7 +258,8 @@ export function assembleRowQuery(
   const rows = hasMore ? page.rows.slice(0, limit) : page.rows;
   const keys = hasMore ? page.keys.slice(0, limit) : page.keys;
   const displayColumns = query.columns.filter((column) => query.displayNames.includes(column.name));
-  const lastKey = keys.at(-1);
+  // The page holds one look-ahead row; the cursor belongs to the last row we return.
+  const lastCursor = page.cursors[rows.length - 1];
   return {
     columns: displayColumns.map((column) => ({
       name: column.name,
@@ -228,7 +270,7 @@ export function assembleRowQuery(
     keys,
     hasMore,
     rowCount,
-    nextCursor: hasMore && query.identity && lastKey ? lastKey : null,
+    nextCursor: hasMore && query.cursorColumns.length > 0 && lastCursor ? lastCursor : null,
     elapsedMs: Math.max(0, Math.round(page.elapsedMs)),
     sql: query.sql,
   };

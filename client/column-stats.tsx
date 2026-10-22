@@ -1,5 +1,5 @@
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useColumnStats, type Filter } from "./api";
 import { describeCell } from "./format";
@@ -12,10 +12,17 @@ export interface ColumnStatsProps extends ViewerHost {
   handleId: string;
   object: string;
   columns: { name: string; declaredType: string; affinity: string }[];
+  column: string;
+  onColumnChange: (column: string) => void;
   filters: Filter[];
   search: string;
+  /** Current width override in pixels, or null for the automatic width. */
+  width: number | null;
+  onSetWidth: (width: number | null) => void;
   onClose: () => void;
 }
+
+const WIDTH_PRESETS = [100, 160, 220, 300];
 
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
@@ -37,12 +44,14 @@ export function ColumnStats({
   handleId,
   object,
   columns,
+  column,
+  onColumnChange,
   filters,
   search,
+  width,
+  onSetWidth,
   onClose,
 }: ColumnStatsProps) {
-  const numericColumns = columns.filter((column) => column.affinity === "integer" || column.affinity === "real" || column.affinity === "numeric");
-  const [column, setColumn] = useState<string>(numericColumns[0]?.name ?? columns[0]?.name ?? "");
   const stats = useColumnStats(hostId, handleId, { object, column, filters, search }, open && column.length > 0);
 
   const styles = useMemo(
@@ -107,12 +116,37 @@ export function ColumnStats({
                 accessibilityRole="button"
                 accessibilityLabel={`Statistics for ${entry.name}`}
                 style={[styles.chip, entry.name === column ? styles.chipActive : null]}
-                onPress={() => setColumn(entry.name)}
+                onPress={() => onColumnChange(entry.name)}
               >
                 <Text style={entry.name === column ? styles.chipTextActive : styles.chipText}>{entry.name}</Text>
               </Pressable>
             ))}
           </ScrollView>
+
+          <View style={{ gap: 6 }}>
+            <Text style={styles.label}>Column width</Text>
+            <View style={styles.chips}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Automatic column width"
+                style={[styles.chip, width === null ? styles.chipActive : null]}
+                onPress={() => onSetWidth(null)}
+              >
+                <Text style={width === null ? styles.chipTextActive : styles.chipText}>Auto</Text>
+              </Pressable>
+              {WIDTH_PRESETS.map((preset) => (
+                <Pressable
+                  key={preset}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Column width ${preset}`}
+                  style={[styles.chip, width === preset ? styles.chipActive : null]}
+                  onPress={() => onSetWidth(preset)}
+                >
+                  <Text style={width === preset ? styles.chipTextActive : styles.chipText}>{preset}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
 
           {stats.isError ? (
             <Text style={styles.error}>{String(stats.error.message)}</Text>

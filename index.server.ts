@@ -17,6 +17,7 @@ import {
   readRowsOf,
   readSchemaOf,
   readStatsOf,
+  saveBlobOf,
   setWriting,
   startJobOf,
   updateRowIn,
@@ -35,6 +36,7 @@ import {
   readRows,
   readSchema,
   readStats,
+  saveBlob,
   startJob,
   updateRow,
 } from "./shared/contracts";
@@ -58,6 +60,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(readRows, (input) => readRowsOf(engine, input));
   server.handle(readCell, (input) => readCellOf(engine, input));
   server.handle(readStats, (input) => readStatsOf(engine, input));
+  server.handle(saveBlob, (input) => saveBlobOf(engine, input));
   server.handle(startJob, (input) => startJobOf(jobs, input));
   server.handle(pollJob, (input) => pollJobOf(jobs, input));
   server.handle(cancelJob, (input) => cancelJobOf(jobs, input));

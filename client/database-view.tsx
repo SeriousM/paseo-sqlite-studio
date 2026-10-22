@@ -69,6 +69,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   const detail = useObjectDetail(hostId, handleId, selected);
   const setWriting = useSetWriting();
   const settings = useSettings(viewerSettings);
+  const [statsColumn, setStatsColumn] = useState<string>("");
 
   const objects = schema.data?.objects ?? [];
   const selectedDetail = detail.data ?? null;
@@ -76,6 +77,29 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
     () => (selectedDetail?.columns ?? []).filter((column) => column.hidden === "normal"),
     [selectedDetail],
   );
+
+  const widthOverrides = useMemo(() => {
+    if (settings.status !== "ready" || selected === null) return undefined;
+    const prefix = `${selected}.`;
+    const overrides: Record<string, number> = {};
+    for (const [key, value] of Object.entries(settings.values.columnWidths)) {
+      if (key.startsWith(prefix)) overrides[key.slice(prefix.length)] = value;
+    }
+    return Object.keys(overrides).length > 0 ? overrides : undefined;
+  }, [settings, selected]);
+
+  const activeStatsColumn = statsColumn.length > 0 ? statsColumn : (visibleColumns[0]?.name ?? "");
+
+  function saveWidth(column: string, width: number | null) {
+    if (settings.status !== "ready" || selected === null) return;
+    const key = `${selected}.${column}`;
+    const next = { ...settings.values.columnWidths };
+    if (width === null) delete next[key];
+    else next[key] = width;
+    const entries = Object.entries(next);
+    const capped = entries.length > 200 ? Object.fromEntries(entries.slice(entries.length - 200)) : next;
+    void settings.save({ ...settings.values, columnWidths: capped }, settings.revision);
+  }
 
   const applyWriting = useCallback(
     (enabled: boolean) => {
@@ -327,7 +351,11 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
                     : undefined
                 }
                 onExport={() => setExportOpen(true)}
-                onStats={() => setStatsOpen(true)}
+                onStats={() => {
+                  setStatsColumn(visibleColumns[0]?.name ?? "");
+                  setStatsOpen(true);
+                }}
+                widthOverrides={widthOverrides}
               />
             )}
           </View>
@@ -343,6 +371,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
         column={cell?.column ?? ""}
         rowKey={cell?.key ?? null}
         preview={cell?.cell ?? null}
+        defaultDirectory={directoryOf(database.path)}
         onClose={() => setCell(null)}
       />
 
@@ -384,8 +413,12 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
         handleId={handleId}
         object={selected ?? ""}
         columns={visibleColumns}
+        column={activeStatsColumn}
+        onColumnChange={setStatsColumn}
         filters={filters}
         search={search}
+        width={settings.status === "ready" ? (settings.values.columnWidths[`${selected ?? ""}.${activeStatsColumn}`] ?? null) : null}
+        onSetWidth={(width) => saveWidth(activeStatsColumn, width)}
         onClose={() => setStatsOpen(false)}
       />
 

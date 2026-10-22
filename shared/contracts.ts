@@ -257,6 +257,20 @@ export const columnStatsSchema = z.object({
   max: cellSchema.nullable(),
 });
 
+export const saveBlob = defineRpc({
+  name: "sqlite.blob.save",
+  input: z.object({
+    handleId: z.string(),
+    object: z.string(),
+    column: z.string(),
+    key: z.array(keyValueSchema),
+    /** Absolute path on the daemon host. */
+    targetPath: z.string().min(1),
+    overwrite: z.boolean().nullish(),
+  }),
+  output: z.object({ path: z.string(), bytes: z.number() }),
+});
+
 export const readStats = defineRpc({
   name: "sqlite.stats",
   input: z.object({

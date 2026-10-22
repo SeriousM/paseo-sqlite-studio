@@ -18,6 +18,12 @@ export const viewerSettings = defineSettings({
     snapshotWithoutAsking: z.boolean().default(false),
     /** Statements typed in the SQL console, newest first. */
     sqlHistory: z.array(z.string()).default([]),
+    /** Column widths the user picked, keyed by "object.column". */
+    columnWidths: z.record(z.string(), z.number().int().min(60).max(640)).default({}),
+    /** Named statements the user saved, newest first. */
+    savedQueries: z
+      .array(z.object({ name: z.string(), sql: z.string() }))
+      .default([]),
     /** Databases the user allowed editing on, by path. */
     writablePaths: z.array(z.string()).default([]),
   }),

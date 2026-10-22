@@ -44,10 +44,12 @@ try {
     }
     const rows = [];
     const keys = [];
+    const cursors = [];
     let names = declared.map((column) => column.name);
     let hasMore = false;
     let budgetExceeded = false;
     const keyColumns = query.keyColumns || [];
+    const cursorColumns = query.cursorColumns || [];
     // An empty list means the caller wants every column the statement returns.
     const rowColumns = query.rowColumns && query.rowColumns.length > 0 ? query.rowColumns : names;
     for (const row of statement.iterate(...query.params)) {
@@ -58,6 +60,7 @@ try {
       if (names.length === 0) names = Object.keys(row);
       rows.push(rowColumns.map((name) => encodeCell(row[name])));
       keys.push(keyColumns.map((name) => encodeKey(row[name])));
+      cursors.push(cursorColumns.map((name) => encodeKey(row[name])));
       if (Date.now() - startedAt > query.budgetMs) {
         budgetExceeded = true;
         hasMore = true;
@@ -72,6 +75,7 @@ try {
       }),
       rows,
       keys,
+      cursors,
       hasMore,
       budgetExceeded,
       changes: null,
@@ -95,6 +99,8 @@ export interface WorkerQuery {
   rowColumns: readonly string[];
   /** Columns whose values come back as row keys, encoded losslessly. */
   keyColumns: readonly string[];
+  /** Columns whose values form the paging cursor for the next page. */
+  cursorColumns: readonly string[];
   /** Milliseconds a single query may scan before it reports a partial result. */
   budgetMs: number;
 }
@@ -103,6 +109,7 @@ export interface WorkerQueryResult {
   columns: Array<{ name: string; declaredType: string; affinity: ColumnAffinity }>;
   rows: Cell[][];
   keys: KeyValue[][];
+  cursors: KeyValue[][];
   hasMore: boolean;
   budgetExceeded: boolean;
   changes: number | null;

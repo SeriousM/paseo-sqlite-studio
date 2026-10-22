@@ -1,5 +1,5 @@
 import { useSettings } from "@getpaseo/plugin/client";
-import { FlatList, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { FlatList, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { viewerSettings } from "../shared/settings";
@@ -18,14 +18,18 @@ const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 34;
 const HISTORY_LIMIT = 20;
 const STARTER_LIMIT = 100;
+const SAVED_LIMIT = 20;
 const ROW_LIMITS = [100, 500, 1000] as const;
 const EMPTY_HISTORY: string[] = [];
+const EMPTY_SAVED: { name: string; sql: string }[] = [];
 
 type RowLimit = (typeof ROW_LIMITS)[number];
 
 /** Runs arbitrary read statements through the daemon-side `sql` job. */
 export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps) {
   const [sql, setSql] = useState("");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
   const [limit, setLimit] = useState<RowLimit>(500);
   const typedRef = useRef(false);
 
@@ -132,6 +136,8 @@ export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps)
         gap: 4,
       },
       historyList: { maxHeight: layout.compact ? 96 : 132 },
+      savedRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingVertical: 4 },
+      savedName: { flex: 1 },
       historyHeader: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
@@ -149,6 +155,7 @@ export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps)
   const columns = useMemo(() => (sqlResult === null ? [] : sqlResult.result.columns), [sqlResult]);
   const rows = sqlResult === null ? [] : sqlResult.result.rows;
   const history = settings.status === "ready" ? settings.values.sqlHistory : EMPTY_HISTORY;
+  const saved = settings.status === "ready" ? settings.values.savedQueries : EMPTY_SAVED;
 
   const widths = useMemo(() => columns.map((column) => columnWidth(column)), [columns]);
   const totalWidth = widths.reduce((sum, width) => sum + width, 0);
@@ -175,6 +182,33 @@ export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps)
     if (settings.status !== "ready") return;
     void settings.save({ ...settings.values, sqlHistory: [] }, settings.revision);
   }, [settings]);
+
+  function openSave() {
+    const firstLine = sql.trim().split("\n")[0] ?? "";
+    setSaveName(firstLine.slice(0, 60));
+    setSaveOpen(true);
+  }
+
+  function saveQuery() {
+    if (settings.status !== "ready") return;
+    const statement = sql.trim();
+    if (statement.length === 0) return;
+    const name = saveName.trim().length > 0 ? saveName.trim() : statement.slice(0, 40);
+    const next = [{ name, sql: statement }, ...settings.values.savedQueries.filter((entry) => entry.sql !== statement)].slice(
+      0,
+      SAVED_LIMIT,
+    );
+    void settings.save({ ...settings.values, savedQueries: next }, settings.revision);
+    setSaveOpen(false);
+  }
+
+  function deleteSaved(statement: string) {
+    if (settings.status !== "ready") return;
+    void settings.save(
+      { ...settings.values, savedQueries: settings.values.savedQueries.filter((entry) => entry.sql !== statement) },
+      settings.revision,
+    );
+  }
 
   function changeSql(next: string) {
     typedRef.current = true;
@@ -260,6 +294,15 @@ export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps)
               <Text style={styles.buttonText}>Cancel</Text>
             </Pressable>
           ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save this statement"
+            disabled={sql.trim().length === 0}
+            style={[styles.button, sql.trim().length === 0 ? styles.buttonDisabled : null]}
+            onPress={openSave}
+          >
+            <Text style={styles.buttonText}>Save</Text>
+          </Pressable>
           <Text style={styles.label}>Row cap</Text>
           {ROW_LIMITS.map((choice) => (
             <Pressable
@@ -334,6 +377,69 @@ export function SqlConsole({ theme, layout, handleId, object }: SqlConsoleProps)
                 )}
               />
             </View>
+          </ScrollView>
+        )}
+      </View>
+
+      <Modal
+        title="Save query"
+        open={saveOpen}
+        onOpenChange={(next) => {
+          if (!next) setSaveOpen(false);
+        }}
+      >
+        <Modal.Content>
+          <View style={styles.controls}>
+            <TextInput
+              value={saveName}
+              onChangeText={setSaveName}
+              placeholder="Name"
+              placeholderTextColor={theme.colors.foregroundMuted}
+              style={[styles.input, styles.savedName]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.controls}>
+            <Pressable accessibilityRole="button" style={styles.button} onPress={() => setSaveOpen(false)}>
+              <Text style={styles.buttonText}>Cancel</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" style={styles.buttonActive} onPress={saveQuery}>
+              <Text style={styles.buttonTextActive}>Save</Text>
+            </Pressable>
+          </View>
+        </Modal.Content>
+      </Modal>
+
+      <View style={styles.history}>
+        <View style={styles.historyHeader}>
+          <Text style={styles.label}>Saved queries</Text>
+        </View>
+        {saved.length === 0 ? (
+          <Text style={styles.note}>Save a statement to reuse it later.</Text>
+        ) : (
+          <ScrollView style={styles.historyList}>
+            {saved.map((entry) => (
+              <View key={entry.sql} style={styles.savedRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use saved query ${entry.name}`}
+                  style={styles.savedName}
+                  onPress={() => changeSql(entry.sql)}
+                >
+                  <Text numberOfLines={1} style={styles.historyText}>
+                    {entry.name}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete saved query ${entry.name}`}
+                  onPress={() => deleteSaved(entry.sql)}
+                >
+                  <Text style={styles.buttonText}>Delete</Text>
+                </Pressable>
+              </View>
+            ))}
           </ScrollView>
         )}
       </View>

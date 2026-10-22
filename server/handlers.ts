@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
@@ -158,6 +158,7 @@ export async function readRowsOf(engine: SqliteEngine, input: RowQuerySpec & { h
       limit: null,
       rowColumns: query.displayNames,
       keyColumns: query.identity?.readColumns ?? [],
+      cursorColumns: query.cursorColumns,
       budgetMs: ROW_BUDGET_MS,
     },
   ];
@@ -170,6 +171,7 @@ export async function readRowsOf(engine: SqliteEngine, input: RowQuerySpec & { h
       limit: null,
       rowColumns: ["c"],
       keyColumns: [],
+      cursorColumns: [],
       budgetMs: ROW_BUDGET_MS,
     });
   }
@@ -344,6 +346,7 @@ export async function readStatsOf(
         limit: null,
         rowColumns: ["total_rows", "non_null", "sum_value", "avg_value", "min_value", "max_value"],
         keyColumns: [],
+        cursorColumns: [],
         budgetMs: ROW_BUDGET_MS,
       },
     ],
@@ -379,4 +382,41 @@ function numberFromCell(cell: unknown): number {
     if (tagged.kind === "bigint" && typeof tagged.value === "string") return Number(tagged.value);
   }
   return 0;
+}
+
+/** Writes one binary cell to a file the user picked, on the daemon host. */
+export function saveBlobOf(
+  engine: SqliteEngine,
+  input: {
+    handleId: string;
+    object: string;
+    column: string;
+    key: readonly KeyValue[];
+    targetPath: string;
+    overwrite?: boolean | null;
+  },
+) {
+  const entry = engine.get(input.handleId);
+  const detail = describeColumns(entry.db, input.object);
+  if (!detail.columns.some((column) => column.name === input.column)) {
+    throw new Error(`Unknown column: ${input.column}`);
+  }
+  const address = addressClause(entry.db, input.object, input.key);
+  const statement = entry.db.prepare(
+    `select ${quoteIdentifier(input.column)} as value from ${quoteIdentifier(input.object)} where ${address.sql}`,
+  );
+  const row = statement.get(...(address.params as never[])) as { value?: unknown } | undefined;
+  if (!row) throw new Error("That row no longer exists.");
+  const value = row.value ?? null;
+  if (value === null) throw new Error("This cell is NULL, so there is nothing to save.");
+  if (!(value instanceof Uint8Array)) throw new Error("Only binary values can be saved to a file.");
+  if (value.byteLength > MAX_CELL_BLOB_BYTES) {
+    throw new Error(`This value is ${value.byteLength} bytes, above the ${MAX_CELL_BLOB_BYTES} byte limit.`);
+  }
+  const target = resolve(input.targetPath);
+  if (existsSync(target) && input.overwrite !== true) {
+    throw new Error(`${target} already exists. Enable overwrite to replace it.`);
+  }
+  writeFileSync(target, value);
+  return { path: target, bytes: value.byteLength };
 }
