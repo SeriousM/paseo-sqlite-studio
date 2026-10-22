@@ -1,12 +1,12 @@
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { readdir, stat as statAsync } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
-import type { Cell, Filter } from "../shared/contracts";
-import type { jobStartInputSchema } from "../shared/contracts";
+import type { Cell, Filter, jobStartInputSchema, keyValueSchema } from "../shared/contracts";
+import { DATABASE_EXTENSIONS } from "../shared/databases";
 
 type JobRequest = z.infer<typeof jobStartInputSchema>;
-import type { keyValueSchema } from "../shared/contracts";
 import { classifySqliteError, readDatabaseInfo, type SqliteEngine } from "./engine";
 import type { JobRegistry } from "./jobs";
 import { assembleRowQuery, buildConditions, buildCountQuery, buildRowQuery, type RowQuerySpec } from "./rows";
@@ -28,8 +28,10 @@ import { deleteRowOf, insertRowOf, updateRowOf } from "./mutations";
 type KeyValue = z.infer<typeof keyValueSchema>;
 type ColumnAssignment = z.infer<typeof columnAssignmentSchema>;
 
-const DEFAULT_DATABASE_EXTENSIONS = ["db", "sqlite", "sqlite3", "db3", "s3db", "gpkg", "sqlite2"];
-const MAX_DIRECTORY_ENTRIES = 1000;
+const DEFAULT_DATABASE_EXTENSIONS: readonly string[] = DATABASE_EXTENSIONS;
+const MAX_DIRECTORY_ENTRIES = 500;
+/** Names inspected before the listing reports itself as truncated. */
+const MAX_DIRECTORY_SCAN = 5000;
 /** A single grid page may scan this long before it reports a partial result. */
 const ROW_BUDGET_MS = 5000;
 /** Hard ceiling for a grid page, so a runaway sort cannot spin forever. */
@@ -52,41 +54,65 @@ function withDatabase<T>(engine: SqliteEngine, handleId: string, run: (db: Datab
   }
 }
 
-export function listPath(input: { path: string; extensions?: readonly string[] | null }) {
+/**
+ * Lists a directory for the file browser. Uses directory entries instead of stat-ing
+ * every name, because a folder with a hundred thousand files used to make this call
+ * take long enough to look hung, and it blocked every other RPC while it ran.
+ */
+export async function listPath(input: { path: string; extensions?: readonly string[] | null }) {
   const target = resolve(input.path);
-  const wanted = new Set((input.extensions ?? DEFAULT_DATABASE_EXTENSIONS).map((value) => value.toLowerCase()));
-  const entries: Array<{ name: string; path: string; isDirectory: boolean; sizeBytes: number; modifiedAt: number }> = [];
-  let truncated = false;
-  const directory = statSync(target);
+  const configured = input.extensions ?? DEFAULT_DATABASE_EXTENSIONS;
+  const wanted = new Set(configured.map((value) => value.toLowerCase()));
+  const showEveryFile = configured.length === 0;
+
+  const directory = await statAsync(target);
   if (!directory.isDirectory()) throw new Error(`${target} is not a directory.`);
 
-  const names = readdirSync(target).sort((left, right) => left.localeCompare(right));
-  for (const name of names) {
-    if (entries.length >= MAX_DIRECTORY_ENTRIES) {
+  const dirents = await readdir(target, { withFileTypes: true });
+  const candidates: Array<{ name: string; path: string; isDirectory: boolean }> = [];
+  let truncated = false;
+  let scanned = 0;
+  for (const dirent of dirents) {
+    if (candidates.length >= MAX_DIRECTORY_ENTRIES || scanned >= MAX_DIRECTORY_SCAN) {
       truncated = true;
       break;
     }
-    if (name.startsWith(".")) continue;
-    const entryPath = join(target, name);
-    let stats;
-    try {
-      stats = statSync(entryPath);
-    } catch {
+    scanned += 1;
+    if (dirent.name.startsWith(".")) continue;
+    if (dirent.isDirectory()) {
+      candidates.push({ name: dirent.name, path: join(target, dirent.name), isDirectory: true });
       continue;
     }
-    const isDirectory = stats.isDirectory();
-    if (!isDirectory) {
-      const extension = name.includes(".") ? (name.split(".").pop() ?? "").toLowerCase() : "";
+    if (!dirent.isFile()) continue;
+    if (!showEveryFile) {
+      const extension = dirent.name.includes(".") ? (dirent.name.split(".").pop() ?? "").toLowerCase() : "";
       if (!wanted.has(extension)) continue;
     }
-    entries.push({
-      name,
-      path: entryPath,
-      isDirectory,
-      sizeBytes: isDirectory ? 0 : stats.size,
-      modifiedAt: stats.mtimeMs,
-    });
+    candidates.push({ name: dirent.name, path: join(target, dirent.name), isDirectory: false });
   }
+
+  // Only the entries that are actually returned get a stat.
+  const settled = await Promise.all(
+    candidates.map(async (candidate) => {
+      try {
+        const stats = await statAsync(candidate.path);
+        return {
+          ...candidate,
+          sizeBytes: candidate.isDirectory ? 0 : stats.size,
+          modifiedAt: stats.mtimeMs,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const entries = settled
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((left, right) => {
+      if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+
   const parent = dirname(target);
   return { path: target, parentPath: parent === target ? null : parent, entries, truncated };
 }

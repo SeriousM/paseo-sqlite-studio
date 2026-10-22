@@ -1,23 +1,9 @@
 import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
-import type { ComponentType } from "react";
-import { sqliteAttachments } from "./shared/attachment";
-import { SqliteFilePanel, type SqliteFilePanelProps } from "./client/file-panel";
+import { SqliteFilePanel } from "./client/file-panel";
 import { SqliteScreen } from "./client/sqlite-screen";
-
-const DATABASE_EXTENSIONS = ["db", "sqlite", "sqlite3", "db3", "s3db", "gpkg"];
-
-interface FilePanelContribution {
-  id: string;
-  title: string;
-  icon: string;
-  files: { extensions: readonly string[]; filenames?: readonly string[] };
-  Component: ComponentType<SqliteFilePanelProps>;
-}
-
-interface FilePanelCapableClient {
-  addFilePanel?: (contribution: FilePanelContribution) => () => void;
-}
+import { sqliteAttachments } from "./shared/attachment";
+import { DATABASE_EXTENSIONS } from "./shared/databases";
 
 function SqliteSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
@@ -46,12 +32,11 @@ export default function contribute(client: PluginClientContext) {
     client.addAttachmentSource(sqliteAttachments),
   ];
 
-  // File panels arrive with Paseo 0.13. Registering only when the host offers
-  // them keeps the plugin usable on 0.12 and switches the file tab on later.
-  const addFilePanel = (client as PluginClientContext & FilePanelCapableClient).addFilePanel;
-  if (typeof addFilePanel === "function") {
+  // File panels arrive with Paseo 0.13. The runtime check keeps this plugin usable
+  // on 0.12 hosts, where the method does not exist yet.
+  if (typeof client.addFilePanel === "function") {
     cleanups.push(
-      addFilePanel.call(client, {
+      client.addFilePanel({
         id: "sqlite-viewer",
         title: "SQLite Studio",
         icon: "Database",

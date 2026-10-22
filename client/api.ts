@@ -1,6 +1,6 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import { useEffect, useRef, useState } from "react";
-import { useRpc } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { z } from "zod";
 import type {
@@ -284,5 +284,43 @@ export function useSaveBlob() {
       targetPath: string;
       overwrite?: boolean;
     }) => save(input),
+  });
+}
+
+export interface WorkspaceStart {
+  name: string;
+  directory: string;
+}
+
+/**
+ * Recent workspaces on this host, used as starting points for the file browser.
+ * Recency is the workspace's own activity timestamp, not ours.
+ */
+export function useWorkspaceStarts(hostId: string, limit = 6) {
+  const paseo = usePaseo();
+  return useQuery({
+    queryKey: ["sqlite", hostId, "workspaces", limit],
+    queryFn: async (): Promise<WorkspaceStart[]> => {
+      const result = await paseo.workspaces.list();
+      const seen = new Set<string>();
+      const starts: Array<WorkspaceStart & { activityAt: string }> = [];
+      for (const workspace of result.entries) {
+        if (workspace.background === true) continue;
+        if (workspace.archivingAt) continue;
+        const directory = workspace.workspaceDirectory ?? workspace.projectRootPath;
+        if (!directory || seen.has(directory)) continue;
+        seen.add(directory);
+        starts.push({
+          name: workspace.title ?? workspace.name,
+          directory,
+          activityAt: workspace.activityAt ?? "",
+        });
+      }
+      return starts
+        .sort((left, right) => right.activityAt.localeCompare(left.activityAt))
+        .slice(0, limit)
+        .map(({ name, directory }) => ({ name, directory }));
+    },
+    staleTime: 30_000,
   });
 }

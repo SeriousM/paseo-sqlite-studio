@@ -3,7 +3,7 @@ import { useSettings } from "@getpaseo/plugin/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { viewerSettings } from "../shared/settings";
-import { useDirectory, useOpenDatabase, type OpenedDatabase } from "./api";
+import { useDirectory, useOpenDatabase, useWorkspaceStarts, type OpenedDatabase } from "./api";
 import { DatabaseView } from "./database-view";
 import { OpenPanel } from "./open-panel";
 
@@ -29,6 +29,7 @@ export function SqliteScreen({ theme, layout, host, params }: PluginScreenProps)
 
   const openDatabase = useOpenDatabase();
   const directory = useDirectory(host.id, browsePath);
+  const workspaceStarts = useWorkspaceStarts(host.id);
 
   const pageSize = values?.pageSize ?? 200;
   const recents = values?.recentPaths ?? [];
@@ -126,6 +127,7 @@ export function SqliteScreen({ theme, layout, host, params }: PluginScreenProps)
         theme={theme}
         layout={layout}
         hostLabel={host.label}
+        workspaces={workspaceStarts.data ?? []}
         recents={recents}
         path={path}
         onPathChange={setPath}

@@ -7,7 +7,7 @@ daemon and on a remote one.
 ## What it does
 
 - Opens `.db`, `.sqlite`, `.sqlite3`, `.db3`, `.s3db`, and `.gpkg` files from its screen, with a
-  path field, a server-side file browser, and a recents list.
+  path field, a server-side file browser that starts from your recent workspaces, and a recents list.
 - Shows the schema as a tree: tables, views, virtual tables with their shadow tables nested, indexes,
   and triggers, with counts per group.
 - Reports per-object structure: columns with declared type, affinity, `NOT NULL`, default, primary key
@@ -62,7 +62,10 @@ including its files, so review the source before installing.
   installed through npm or Docker needs its own Node). The plugin reports a clear message when the
   runtime has no `node:sqlite`.
 - Opening a database from the file viewer tab needs Paseo 0.13.0 or later. On 0.12 the plugin opens
-  from its own screen, and the file viewer keeps showing its binary preview message.
+  from its own screen, and the file viewer keeps showing its binary preview message. The panel
+  registration is feature-detected, so one build covers both releases.
+- Development typechecks against `@getpaseo/plugin` 0.13.0-beta.1 to get the file-panel types, while
+  the runtime stays compatible with 0.12 hosts.
 
 ## Development
 

@@ -1,7 +1,8 @@
 import { ScrollView, TextInput } from "@getpaseo/plugin/client/react-native";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
-import type { DirectoryListing } from "./api";
+import { databaseExtensionsLabel } from "../shared/databases";
+import type { DirectoryListing, WorkspaceStart } from "./api";
 import { formatBytesForHumans } from "./format";
 import type { ViewerHost } from "./types";
 
@@ -13,6 +14,8 @@ import type { ViewerHost } from "./types";
 export interface OpenPanelProps extends ViewerHost {
   /** Which daemon these paths live on; two hosts can be connected at once. */
   hostLabel: string;
+  /** Recent workspaces on this host, offered as starting points for the browser. */
+  workspaces: WorkspaceStart[];
   recents: string[];
   path: string;
   onPathChange: (path: string) => void;
@@ -31,6 +34,7 @@ export function OpenPanel({
   theme,
   layout,
   hostLabel,
+  workspaces,
   recents,
   path,
   onPathChange,
@@ -95,6 +99,19 @@ export function OpenPanel({
       browseParent: { color: theme.colors.foregroundMuted, fontSize: 13 },
       browseSize: { color: theme.colors.foregroundMuted, fontSize: 11 },
       recentPath: { color: theme.colors.foreground, fontSize: 12, flexShrink: 1 },
+      chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6, marginTop: 4 },
+      chip: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface1,
+        maxWidth: 260,
+      },
+      chipName: { color: theme.colors.foreground, fontSize: 12 },
+      chipPath: { color: theme.colors.foregroundMuted, fontSize: 10 },
+      filterNote: { color: theme.colors.foregroundMuted, fontSize: 11 },
       recentPathPressable: { flexGrow: 1, flexShrink: 1 },
       message: { color: theme.colors.foregroundMuted, fontSize: 13 },
       error: { color: theme.colors.statusDanger, fontSize: 13 },
@@ -146,6 +163,32 @@ export function OpenPanel({
             <Text style={styles.buttonText}>Browse</Text>
           </Pressable>
         </View>
+
+        {workspaces.length === 0 ? null : (
+          <View>
+            <Text style={styles.sectionTitle}>Recent workspaces</Text>
+            <View style={styles.chips}>
+              {workspaces.map((workspace) => (
+                <Pressable
+                  key={workspace.directory}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Browse ${workspace.name}`}
+                  style={styles.chip}
+                  onPress={() => onBrowse(workspace.directory)}
+                >
+                  <Text numberOfLines={1} style={styles.chipName}>
+                    {workspace.name}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.chipPath}>
+                    {workspace.directory}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <Text style={styles.filterNote}>{`Listing ${databaseExtensionsLabel()} files`}</Text>
 
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
 

@@ -1,19 +1,14 @@
+import type { PluginFilePanelProps } from "@getpaseo/plugin/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useOpenDatabase, type OpenedDatabase } from "./api";
 import { DatabaseView } from "./database-view";
-import type { ViewerSurface } from "./types";
 
 /**
- * The host hands a file panel the path on the daemon that owns it, so the
- * database is opened where it lives: nothing but query results crosses the wire.
+ * The host hands a file panel the path on the daemon that owns it, so the database
+ * is opened where it lives: nothing but query results crosses the wire.
  */
-export interface SqliteFilePanelProps extends ViewerSurface {
-  file: { path: string; name: string };
-  pageSize?: number;
-}
-
-export function SqliteFilePanel({ theme, layout, host, file, pageSize }: SqliteFilePanelProps) {
+export function SqliteFilePanel({ theme, layout, host, file }: PluginFilePanelProps) {
   const openDatabase = useOpenDatabase();
   const [database, setDatabase] = useState<OpenedDatabase | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +76,7 @@ export function SqliteFilePanel({ theme, layout, host, file, pageSize }: SqliteF
         hostLabel={host.label}
         handleId={database.handleId}
         database={database}
-        pageSize={pageSize ?? 200}
+        pageSize={200}
       />
     );
   }

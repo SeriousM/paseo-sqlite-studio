@@ -12,8 +12,11 @@ what you can look at.
 ## Setup
 
 Nothing to configure to browse. Open SQLite Studio from the sidebar, or run its command from the command
-center, then pick a file with the path field or the built-in browser. Paths opened before are
-listed under recents, and the last directory you browsed is remembered per daemon.
+center, then pick a file with the path field or the built-in browser. The browser offers your recent
+workspaces as starting points and lists directories plus files ending in `.db`, `.sqlite`, `.sqlite3`,
+`.db3`, `.s3db`, or `.gpkg`. Paths opened before are listed under recents, and the last directory you
+browsed is remembered per daemon. With more than one daemon connected, the panel names the host it is
+browsing.
 
 Two requirements are worth knowing:
 
