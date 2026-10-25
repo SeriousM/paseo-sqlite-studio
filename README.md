@@ -61,11 +61,11 @@ including its files, so review the source before installing.
 - The daemon host runs Node 22.13 or newer (the desktop app bundles a suitable runtime; a daemon
   installed through npm or Docker needs its own Node). The plugin reports a clear message when the
   runtime has no `node:sqlite`.
-- Opening a database from the file viewer tab needs Paseo 0.13.0 or later. On 0.12 the plugin opens
-  from its own screen, and the file viewer keeps showing its binary preview message. The panel
-  registration is feature-detected, so one build covers both releases.
-- Development typechecks against `@getpaseo/plugin` 0.13.0-beta.1 to get the file-panel types, while
-  the runtime stays compatible with 0.12 hosts.
+- Opening a database from the file viewer tab needs Paseo 0.13.0 or later (released 2026-10-24). On
+  0.12 the plugin opens from its own screen and the file viewer keeps showing its binary preview
+  message. The panel registration is feature-detected, so one build covers both releases.
+- Development typechecks against `@getpaseo/plugin` 0.13.0 to get the file-panel types, while the
+  runtime stays compatible with 0.12 hosts.
 
 ## Development
 

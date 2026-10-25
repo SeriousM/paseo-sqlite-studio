@@ -23,8 +23,8 @@ Two requirements are worth knowing:
 - The daemon host needs Node 22.13 or newer, because the plugin uses Node's own SQLite module. The
   desktop app bundles a suitable runtime. A daemon installed through npm or Docker uses the Node on
   that machine, and the plugin says so plainly when the module is missing.
-- Opening a database directly from a file tab needs Paseo 0.13.0 or later. Until then the file viewer
-  keeps showing its binary preview message and the plugin opens from its own screen.
+- Opening a database directly from a file tab needs Paseo 0.13.0 or later, which is released. On 0.12
+  the plugin still works from its own screen, and the file viewer keeps its binary preview message.
 
 ## Reading databases
 
