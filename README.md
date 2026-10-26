@@ -78,6 +78,9 @@ paseo plugin reload paseo-sqlite-studio
 ```
 
 `scratch/` holds generated databases and screenshots and is not committed.
+`pnpm-workspace.yaml` exempts the current Paseo SDK release from pnpm's
+minimum-release-age policy, which would otherwise reject a freshly published
+version on a clean install.
 
 ## Layout
 
