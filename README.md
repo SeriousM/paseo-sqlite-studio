@@ -12,6 +12,18 @@ Up front: I used AI to write a good part of the code and to help with the docs. 
 feature list and the trade-offs are mine. Read the source like any third-party code, especially
 before you turn on editing.
 
+## Screens
+
+Data and structure, side by side:
+
+| Data | Structure |
+| --- | --- |
+| ![Data grid with the schema tree beside it](assets/screenshot-data.png) | ![Columns, indexes, foreign keys and the DDL for a table](assets/screenshot-structure.png) |
+
+The SQL console:
+
+![Grouped query results with statement history below](assets/screenshot-sql.png)
+
 ## What it does
 
 - Opens `.db`, `.sqlite`, `.sqlite3`, `.db3`, `.s3db` and `.gpkg` files: type a path, use the file
