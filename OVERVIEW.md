@@ -1,9 +1,8 @@
 # SQLite Studio
 
-Browse and edit SQLite databases inside Paseo. Open a database from the SQLite screen, or from the
-file viewer once the app supports plugin file panels, and work with it the way a desktop database
-tool would: a schema tree, a data grid, a structure report, a read-only SQL console, exports, and
-optional row editing.
+Browse and edit SQLite databases inside Paseo. Open a database from the SQLite screen, or from a
+file tab in the file viewer, and work with it the way a desktop database tool would: a schema tree,
+a data grid, a structure report, a read-only SQL console, exports, and optional row editing.
 
 The plugin reads databases on the daemon that owns them. A database on a remote machine is queried
 on that machine and only the results travel to your client, so file size and location do not limit
