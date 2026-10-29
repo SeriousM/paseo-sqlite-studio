@@ -103,10 +103,20 @@ export function useObjectDetail(hostId: string, handleId: string | null, name: s
   });
 }
 
-export function useRows(hostId: string, handleId: string | null, request: RowRequest, enabled = true) {
+/**
+ * `refreshKey` is part of the cache key, not of the request: bumping it refetches
+ * the same page after a write without sending an extra field to the daemon.
+ */
+export function useRows(
+  hostId: string,
+  handleId: string | null,
+  request: RowRequest,
+  refreshKey = 0,
+  enabled = true,
+) {
   const rows = useRpc(readRows);
   return useQuery({
-    queryKey: ["sqlite", hostId, "rows", handleId, request],
+    queryKey: ["sqlite", hostId, "rows", handleId, request, refreshKey],
     enabled: handleId !== null && enabled,
     queryFn: () => rows({ handleId: handleId ?? "", ...request }),
     // Row data changes on disk, not on a schedule: refetch only when asked.

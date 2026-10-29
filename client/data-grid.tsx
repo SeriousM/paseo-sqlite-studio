@@ -93,7 +93,7 @@ export function DataGrid({
     setPages([{ cursor: null, offset: 0 }]);
     setPageIndex(0);
     setCountExact(false);
-  }, [object, query, sort, filters, reloadKey]);
+  }, [object, query, sort, filters]);
 
   const page = pages[Math.min(pageIndex, pages.length - 1)] ?? { cursor: null, offset: 0 };
   const request = useMemo(
@@ -107,10 +107,12 @@ export function DataGrid({
       search: query,
       countExact,
     }),
-    [object, pageSize, page.cursor, page.offset, sort, filters, query, countExact, reloadKey],
+    [object, pageSize, page.cursor, page.offset, sort, filters, query, countExact],
   );
 
-  const rowsQuery = useRows(hostId, handleId, request);
+  // After a write the current page is refetched in place, so editing a row far
+  // down the table does not throw the reader back to the first page.
+  const rowsQuery = useRows(hostId, handleId, request, reloadKey);
   const result = rowsQuery.data;
   const rows = result?.rows ?? [];
   const keys = result?.keys ?? [];
