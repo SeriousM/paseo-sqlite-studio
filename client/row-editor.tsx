@@ -12,6 +12,8 @@ export interface RowEditorProps extends ViewerHost {
   mode: "insert" | "edit";
   rowKey: KeyValue[] | null;
   initialValues: Cell[] | null;
+  /** Column to focus when the form opens, usually the cell that was clicked. */
+  focusColumn?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -121,6 +123,7 @@ export function RowEditor({
   mode,
   rowKey,
   initialValues,
+  focusColumn = null,
   onClose,
   onSaved,
 }: RowEditorProps) {
@@ -327,6 +330,7 @@ export function RowEditor({
                   <View style={styles.fieldRow}>
                     <TextInput
                       value={state.text}
+                      autoFocus={focusColumn === column.name}
                       onChangeText={(text) => updateField(column.name, { text })}
                       editable={!state.isNull}
                       placeholder={column.affinity === "blob" ? "base64" : declared}

@@ -21,6 +21,8 @@ export interface CellDetailProps extends ViewerHost {
   preview: Cell;
   /** Where a saved binary value goes by default: the database's directory. */
   defaultDirectory: string;
+  /** Present when rows can be edited; opens the row form for this row. */
+  onEditRow?: (() => void) | undefined;
   onClose: () => void;
 }
 
@@ -62,6 +64,7 @@ export function CellDetail({
   rowKey,
   preview,
   defaultDirectory,
+  onEditRow,
   onClose,
 }: CellDetailProps) {
   const { mutate } = useCellValue();
@@ -257,6 +260,16 @@ export function CellDetail({
         )}
 
         <View style={styles.actions}>
+          {onEditRow === undefined ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit this row"
+              style={[styles.button, styles.buttonPrimary]}
+              onPress={onEditRow}
+            >
+              <Text style={styles.buttonText}>Edit row</Text>
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Copy this value"

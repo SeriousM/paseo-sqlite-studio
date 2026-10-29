@@ -42,6 +42,7 @@ interface EditorTarget {
   mode: "insert" | "edit";
   key: KeyValue[] | null;
   values: Cell[] | null;
+  focusColumn?: string | null;
 }
 
 function directoryOf(path: string): string {
@@ -383,6 +384,15 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
         rowKey={cell?.key ?? null}
         preview={cell?.cell ?? null}
         defaultDirectory={directoryOf(database.path)}
+        onEditRow={
+          canEditRows && cell !== null
+            ? () => {
+                const target = cell;
+                setCell(null);
+                setEditor({ mode: "edit", key: target.key, values: target.row, focusColumn: target.column });
+              }
+            : undefined
+        }
         onClose={() => setCell(null)}
       />
 
@@ -396,6 +406,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
           mode={editor.mode}
           rowKey={editor.key}
           initialValues={editor.values}
+          focusColumn={editor.focusColumn ?? null}
           onClose={() => setEditor(null)}
           onSaved={() => setReloadKey((value) => value + 1)}
         />

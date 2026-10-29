@@ -367,7 +367,7 @@ export function DataGrid({
         <ScrollView horizontal contentContainerStyle={{ width: totalWidth }}>
           <View>
             <View style={styles.headerRow}>
-              <Text style={[styles.gutter, { lineHeight: HEADER_HEIGHT }]}>#</Text>
+              <Text style={[styles.gutter, { lineHeight: HEADER_HEIGHT }]}>{onEditRow ? "✎" : "#"}</Text>
               {columns.map((column, index) => {
                 const direction = sortDirection(column.name);
                 return (
@@ -412,7 +412,9 @@ export function DataGrid({
                         })
                       }
                     >
-                      <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>{page.offset + index + 1}</Text>
+                      <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>
+                        {`✎ ${page.offset + index + 1}`}
+                      </Text>
                     </Pressable>
                   ) : (
                     <Text style={[styles.gutter, { lineHeight: ROW_HEIGHT }]}>{page.offset + index + 1}</Text>
