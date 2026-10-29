@@ -216,8 +216,8 @@ describe("row identity", () => {
       create table tri(rowid text, _rowid_ text, oid text, body text);
       insert into tri values ('duplicate', 'duplicate', 'duplicate', 'same'),
                              ('duplicate', 'duplicate', 'duplicate', 'same');
-      create table shadowed_key(rowid text, id integer primary key, body text);
-      insert into shadowed_key values ('duplicate', 1, 'first'), ('duplicate', 2, 'second');
+      create table shadowed_key(rowid text, _rowid_ text, oid text, id integer primary key, body text);
+      insert into shadowed_key values ('r', 'r', 'r', 1, 'first'), ('r', 'r', 'r', 2, 'second');
       create table collision(__paseo_rowid__ integer, payload blob);
       insert into collision values (2, x'AA'), (2, x'BB');
     `);
@@ -271,7 +271,8 @@ describe("row identity", () => {
       }),
     ).toEqual({ changes: 1 });
     const rows = await readRowsOf(engine, { handleId, object: "shadowed_key", limit: 10 });
-    expect(rows.rows.map((row) => row[2])).toEqual(["changed", "second"]);
+    const bodyIndex = rows.columns.findIndex((column) => column.name === "body");
+    expect(rows.rows.map((row) => row[bodyIndex])).toEqual(["changed", "second"]);
   });
 
   it("refuses every write when no identity exists and nothing is written", async () => {
