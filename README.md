@@ -92,7 +92,7 @@ otherwise a freshly published version gets rejected on a clean install.
 
 ## Public now
 
-The repository is public and this is the 1.1.0 release. I built the thing I wanted, so it follows my
+The repository is public and this is the 1.1.1 release. I built the thing I wanted, so it follows my
 own habits first. Bug reports and patches are welcome, keep them to the point.
 
 ## Layout

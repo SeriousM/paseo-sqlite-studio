@@ -1,7 +1,7 @@
 {
   "name": "paseo-sqlite-studio",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",

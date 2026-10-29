@@ -65,7 +65,8 @@ copy is refused, and switching editing off closes the writable handle.
 The SQLite attachment source in the composer attaches a table as context for an agent: the DDL, the
 column list with keys and defaults, indexes, foreign keys, and a few sample rows, bounded to about
 four kilobytes. It searches tables and views in the databases you opened recently, on the daemon that
-owns them.
+owns them. The attached text becomes part of the prompt, so the schema and sample rows go to the
+agent provider you selected, like anything else you type there.
 
 ## Data and permissions
 
