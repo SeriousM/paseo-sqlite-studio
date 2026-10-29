@@ -57,8 +57,10 @@ Editing is off by default. Enabling it for a database opens the file for writing
 path before doing so. With editing on, a row can be inserted, updated, or deleted from the grid;
 changes run immediately against the real file inside a transaction, there is no undo, and other
 programs reading the file see them. Primary keys and row identities are used to target a single row,
-and a statement that matches no row reports that instead of doing nothing quietly. Editing a snapshot
-copy is refused, and switching editing off closes the writable handle.
+and a statement that matches no row reports that instead of doing nothing quietly. A table with no
+primary key and no accessible rowid cannot be edited, and the grid says so instead of guessing which
+row you meant. Editing a snapshot copy is refused, and switching editing off closes the writable
+handle.
 
 ## Prompt attachments
 

@@ -90,9 +90,16 @@ paseo plugin reload paseo-sqlite-studio
 `pnpm-workspace.yaml` exempts the current Paseo SDK release from pnpm's minimum-release-age policy,
 otherwise a freshly published version gets rejected on a clean install.
 
+## Releasing
+
+1. Bump `version` in `package.json` and the number in "Public now".
+2. Commit, tag `vX.Y.Z`, push the branch and the tag.
+3. `gh release create vX.Y.Z` so every version has a release page.
+4. Open a registry submission for the new commit: listings pin a commit and do not bump themselves.
+
 ## Public now
 
-The repository is public and this is the 1.1.1 release. I built the thing I wanted, so it follows my
+The repository is public and this is the 1.1.2 release. I built the thing I wanted, so it follows my
 own habits first. Bug reports and patches are welcome, keep them to the point.
 
 ## Layout

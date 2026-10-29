@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   countRows,
   describeColumns,
-  hasRowId,
+  rowIdAlias,
   listForeignKeys,
   listIndexes,
   listObjects,
@@ -145,7 +145,7 @@ describe("describeColumns", () => {
     expect(detail.withoutRowId).toBe(true);
     expect(detail.strict).toBe(true);
     expect(primaryKeyColumns(db, "metrics")).toEqual(["key"]);
-    expect(hasRowId(db, "metrics")).toBe(false);
+    expect(rowIdAlias(db, "metrics")).toBeNull();
     db.close();
   });
 
@@ -155,6 +155,26 @@ describe("describeColumns", () => {
     const hidden = detail.columns.filter((column) => column.hidden !== "normal").map((column) => column.name);
     expect(hidden).toContain("tickets_fts");
     expect(detail.columns.some((column) => column.name === "subject" && column.hidden === "normal")).toBe(true);
+    db.close();
+  });
+});
+
+describe("row identity", () => {
+  it("picks the first rowid name that a declared column does not shadow", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      create table plain(body text);
+      create table shadows_rowid(rowid text, body text);
+      create table shadows_two(rowid text, _rowid_ text, body text);
+      create table shadows_all(rowid text, _rowid_ text, oid text, body text);
+      create table shadows_all_with_key(rowid text, _rowid_ text, oid text, id integer primary key, body text);
+    `);
+    expect(rowIdAlias(db, "plain")).toBe("rowid");
+    expect(rowIdAlias(db, "shadows_rowid")).toBe("_rowid_");
+    expect(rowIdAlias(db, "shadows_two")).toBe("oid");
+    expect(rowIdAlias(db, "shadows_all")).toBeNull();
+    expect(rowIdAlias(db, "shadows_all_with_key")).toBeNull();
+    expect(primaryKeyColumns(db, "shadows_all_with_key")).toEqual(["id"]);
     db.close();
   });
 });
@@ -193,7 +213,7 @@ describe("indexes, foreign keys, and identity", () => {
     expect(objectKind(db, "metrics")).toBe("table");
     expect(objectKind(db, "tickets_fts")).toBe("virtual-table");
     expect(objectKind(db, "nope")).toBeNull();
-    expect(hasRowId(db, "users")).toBe(true);
+    expect(rowIdAlias(db, "users")).toBe("rowid");
     db.close();
   });
 });

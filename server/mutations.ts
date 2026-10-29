@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { columnAssignmentSchema, keyValueSchema } from "../shared/contracts";
 import { encodeKey } from "../shared/cell-encoding";
 import { addressClause, writeBindValue } from "./addressing";
-import { describeColumns, hasRowId, primaryKeyColumns, quoteIdentifier } from "./schema";
+import { describeColumns, primaryKeyColumns, quoteIdentifier, rowIdAlias } from "./schema";
 
 type ColumnAssignment = z.infer<typeof columnAssignmentSchema>;
 type KeyValue = z.infer<typeof keyValueSchema>;
@@ -65,6 +65,13 @@ export function insertRowOf(
   input: { object: string; values: readonly ColumnAssignment[] },
 ): { insertedKeys: KeyValue[][]; changes: number } {
   assertKnownColumns(db, input.object, input.values);
+  const rowId = rowIdAlias(db, input.object);
+  const primaryKey = rowId === null ? primaryKeyColumns(db, input.object) : [];
+  if (rowId === null && primaryKey.length === 0) {
+    throw new Error(
+      `${input.object} has no primary key and no accessible rowid, so a new row cannot be addressed afterwards. Editing is not available for this table.`,
+    );
+  }
   const columns = input.values.map((assignment) => quoteIdentifier(assignment.column)).join(", ");
   const placeholders = input.values.map(() => "?").join(", ");
   const statement = db.prepare(
@@ -75,11 +82,10 @@ export function insertRowOf(
     return Number(result.changes ?? 0);
   });
 
-  if (hasRowId(db, input.object)) {
+  if (rowId !== null) {
     const row = db.prepare("select last_insert_rowid() as id").get() as { id?: number | bigint } | undefined;
     return { insertedKeys: [[encodeKey(row?.id ?? null)]], changes };
   }
-  const primaryKey = primaryKeyColumns(db, input.object);
   const key = primaryKey.map((column) => {
     const assignment = input.values.find((entry) => entry.column === column);
     if (!assignment) throw new Error(`${column} is part of the primary key and needs a value.`);

@@ -13,13 +13,13 @@ import { assembleRowQuery, buildConditions, buildCountQuery, buildRowQuery, type
 import { runQueriesInWorker } from "./sql-worker";
 import {
   describeColumns,
-  hasRowId,
   listForeignKeys,
   listIndexes,
   listObjects,
   objectKind,
   primaryKeyColumns,
   quoteIdentifier,
+  rowIdAlias,
 } from "./schema";
 import type { columnAssignmentSchema } from "../shared/contracts";
 import { addressClause } from "./addressing";
@@ -154,6 +154,8 @@ export function readObjectOf(engine: SqliteEngine, input: { handleId: string; na
       | undefined;
     const isData = kind === "table" || kind === "view" || kind === "virtual-table" || kind === "shadow-table";
     const detail = isData ? describeColumns(db, input.name) : { columns: [], withoutRowId: false, strict: false };
+    const editable =
+      isData && (rowIdAlias(db, input.name) !== null || primaryKeyColumns(db, input.name).length > 0);
     return {
       kind,
       name: input.name,
@@ -161,6 +163,7 @@ export function readObjectOf(engine: SqliteEngine, input: { handleId: string; na
       sql: master?.sql ?? null,
       withoutRowId: detail.withoutRowId,
       strict: detail.strict,
+      editable,
       columns: detail.columns,
       indexes: isData ? listIndexes(db, input.name) : [],
       foreignKeys: isData ? listForeignKeys(db, input.name) : [],

@@ -185,11 +185,18 @@ export function countRows(db: DatabaseSync, name: string): number {
   return typeof row.c === "bigint" ? Number(row.c) : row.c;
 }
 
-/** True when rows of `name` can be addressed by `rowid`. */
-export function hasRowId(db: DatabaseSync, name: string): boolean {
+const ROWID_ALIASES = ["rowid", "_rowid_", "oid"] as const;
+
+/**
+ * Name that still refers to the implicit rowid of `name`, or null when no name
+ * does. A declared column shadows the alias of the same name, so a table with a
+ * `rowid` column is addressed through `_rowid_` or `oid` instead.
+ */
+export function rowIdAlias(db: DatabaseSync, name: string): string | null {
   const info = readTableList(db).get(name);
-  if (!info) return false;
-  return info.type === "table" && info.wr === 0;
+  if (!info || info.type !== "table" || info.wr !== 0) return null;
+  const declared = new Set(describeColumns(db, name).columns.map((column) => column.name.toLowerCase()));
+  return ROWID_ALIASES.find((alias) => !declared.has(alias)) ?? null;
 }
 
 export function primaryKeyColumns(db: DatabaseSync, name: string): string[] {

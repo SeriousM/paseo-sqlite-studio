@@ -230,6 +230,8 @@ export const readObject = defineRpc({
     sql: z.string().nullable(),
     withoutRowId: z.boolean(),
     strict: z.boolean(),
+    /** False when no primary key or accessible rowid identifies one row. */
+    editable: z.boolean(),
     columns: z.array(columnSchema),
     indexes: z.array(indexSchema),
     foreignKeys: z.array(foreignKeySchema),

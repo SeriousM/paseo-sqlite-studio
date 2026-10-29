@@ -203,3 +203,93 @@ describe("write mode", () => {
     expect(row?.age).toBeNull();
   });
 });
+
+describe("row identity", () => {
+  async function identityFixture(): Promise<{ engine: SqliteEngine; handleId: string; path: string }> {
+    const directory = mkdtempSync(join(tmpdir(), "paseo-sqlite-identity-"));
+    directories.push(directory);
+    const path = join(directory, "identity.db");
+    const db = new DatabaseSync(path);
+    db.exec(`
+      create table notes(rowid text, body text);
+      insert into notes values ('duplicate', 'same'), ('duplicate', 'same');
+      create table tri(rowid text, _rowid_ text, oid text, body text);
+      insert into tri values ('duplicate', 'duplicate', 'duplicate', 'same'),
+                             ('duplicate', 'duplicate', 'duplicate', 'same');
+      create table shadowed_key(rowid text, id integer primary key, body text);
+      insert into shadowed_key values ('duplicate', 1, 'first'), ('duplicate', 2, 'second');
+    `);
+    db.close();
+
+    const engine = new SqliteEngine();
+    engines.push(engine);
+    const opened = await engine.open(path);
+    if (!opened.ok) throw new Error("fixture database did not open");
+    setWriting(engine, { handleId: opened.entry.handleId, enabled: true });
+    return { engine, handleId: opened.entry.handleId, path };
+  }
+
+  function readNotes(path: string): Array<{ rowid: string; body: string }> {
+    const db = new DatabaseSync(path, { readOnly: true });
+    const rows = db.prepare("select rowid, body from notes order by _rowid_").all();
+    db.close();
+    return rows as Array<{ rowid: string; body: string }>;
+  }
+
+  it("addresses duplicate rows by an unshadowed rowid alias", async () => {
+    const { engine, handleId, path } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "notes", limit: 10 });
+    expect(page.keys).toHaveLength(2);
+    expect(page.keys[0]).not.toEqual(page.keys[1]);
+
+    expect(deleteRowIn(engine, { handleId, object: "notes", key: page.keys[0]!, expected: null })).toEqual({ changes: 1 });
+    expect(readNotes(path)).toEqual([{ rowid: "duplicate", body: "same" }]);
+  });
+
+  it("updates one duplicate row and leaves the other alone", async () => {
+    const { engine, handleId, path } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "notes", limit: 10 });
+    expect(updateRowIn(engine, { handleId, object: "notes", key: page.keys[1]!, changes: [{ column: "body", value: "changed" }] })).toEqual({ changes: 1 });
+    expect(readNotes(path)).toEqual([
+      { rowid: "duplicate", body: "same" },
+      { rowid: "duplicate", body: "changed" },
+    ]);
+  });
+
+  it("uses the primary key when every rowid name is shadowed", async () => {
+    const { engine, handleId } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "shadowed_key", limit: 10 });
+    expect(page.keys).toEqual([[1], [2]]);
+    expect(
+      updateRowIn(engine, {
+        handleId,
+        object: "shadowed_key",
+        key: page.keys[0]!,
+        changes: [{ column: "body", value: "changed" }],
+      }),
+    ).toEqual({ changes: 1 });
+    const rows = await readRowsOf(engine, { handleId, object: "shadowed_key", limit: 10 });
+    expect(rows.rows.map((row) => row[2])).toEqual(["changed", "second"]);
+  });
+
+  it("refuses every write when no identity exists and nothing is written", async () => {
+    const { engine, handleId, path } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "tri", limit: 10 });
+    expect(page.keys.every((key) => key.length === 0)).toBe(true);
+
+    expect(() => deleteRowIn(engine, { handleId, object: "tri", key: [], expected: null })).toThrow(
+      /no primary key and no accessible rowid/i,
+    );
+    expect(() =>
+      updateRowIn(engine, { handleId, object: "tri", key: [], changes: [{ column: "body", value: "changed" }] }),
+    ).toThrow(/no primary key and no accessible rowid/i);
+    expect(() => insertRowIn(engine, { handleId, object: "tri", values: [{ column: "body", value: "new" }] })).toThrow(
+      /no primary key and no accessible rowid/i,
+    );
+
+    const db = new DatabaseSync(path, { readOnly: true });
+    const count = db.prepare("select count(*) as c from tri").get() as { c: number };
+    db.close();
+    expect(count.c).toBe(2);
+  });
+});

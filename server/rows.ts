@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
 import type { Cell, columnSchema, filterSchema, rowQueryResultSchema, sortSchema, keyValueSchema } from "../shared/contracts";
-import { describeColumns, hasRowId, primaryKeyColumns, quoteIdentifier } from "./schema";
+import { describeColumns, primaryKeyColumns, quoteIdentifier, rowIdAlias } from "./schema";
 import { bindValue } from "../shared/cell-encoding";
 import type { WorkerQueryResult } from "./sql-worker";
 
@@ -40,7 +40,8 @@ interface Identity {
   orderColumns: string[];
   /** Keys to read the key values out of a result row. */
   readColumns: string[];
-  usesRowId: boolean;
+  /** Alias of the implicit rowid that keys project, when the table has one. */
+  rowId: string | null;
 }
 
 const MAX_SEARCH_COLUMNS = 40;
@@ -90,11 +91,10 @@ function filterClause(filter: Filter, quotedColumn: string): { sql: string; para
 }
 
 function resolveIdentity(db: DatabaseSync, object: string): Identity | null {
-  if (hasRowId(db, object)) return { orderColumns: ["rowid"], readColumns: [ROWID_ALIAS], usesRowId: true };
+  const rowId = rowIdAlias(db, object);
+  if (rowId !== null) return { orderColumns: [rowId], readColumns: [ROWID_ALIAS], rowId };
   const primaryKey = primaryKeyColumns(db, object);
-  return primaryKey.length > 0
-    ? { orderColumns: primaryKey, readColumns: primaryKey, usesRowId: false }
-    : null;
+  return primaryKey.length > 0 ? { orderColumns: primaryKey, readColumns: primaryKey, rowId: null } : null;
 }
 
 /**
@@ -118,7 +118,7 @@ function keysetColumns(
   // `table_xinfo` reports it as nullable.
   const primaryKey = columns.filter((candidate) => candidate.primaryKeyPosition > 0);
   const isRowIdAlias =
-    identity?.usesRowId === true && primaryKey.length === 1 && primaryKey[0]?.name === entry.column;
+    identity?.rowId != null && primaryKey.length === 1 && primaryKey[0]?.name === entry.column;
   // Duplicates would make `>` skip rows, and NULLs would make it skip them all.
   return isIdentity || isRowIdAlias || (column !== undefined && column.unique && column.notNull)
     ? [entry.column]
@@ -217,7 +217,9 @@ export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery 
     if (column !== ROWID_ALIAS && !selection.includes(column)) selection.push(column);
   }
   const projection = selection.map(quoteIdentifier);
-  if (identity?.usesRowId) projection.unshift(`rowid as ${quoteIdentifier(ROWID_ALIAS)}`);
+  if (identity?.rowId) {
+    projection.unshift(`${quoteIdentifier(identity.rowId)} as ${quoteIdentifier(ROWID_ALIAS)}`);
+  }
 
   // An explicit sort wins; the identity only breaks ties so paging stays stable.
   const orderBy = buildOrder({ sort }, detail.columns, identity?.orderColumns ?? []);

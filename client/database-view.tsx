@@ -225,6 +225,8 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   const showTree = layout.compact ? treeVisible : true;
   const showContent = layout.compact ? !treeVisible : true;
   const isData = selectedDetail?.kind === "table" || selectedDetail?.kind === "view" || selectedDetail?.kind === "virtual-table" || selectedDetail?.kind === "shadow-table";
+  const canEditRows = writable && selectedDetail?.editable === true;
+  const noRowIdentity = writable && isData && selectedDetail !== null && !selectedDetail.editable;
 
   return (
     <View style={styles.root}>
@@ -274,6 +276,9 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
             </Text>
           ))}
           {writeNotice === null ? null : <Text style={styles.badgeWarning}>{writeNotice}</Text>}
+          {noRowIdentity ? (
+            <Text style={styles.badgeWarning}>rows cannot be edited: no primary key or rowid</Text>
+          ) : null}
         </View>
       </View>
 
@@ -350,9 +355,9 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
                 onSortChange={setSort}
                 reloadKey={reloadKey}
                 onOpenCell={setCell}
-                onInsertRow={writable ? () => setEditor({ mode: "insert", key: null, values: null }) : undefined}
+                onInsertRow={canEditRows ? () => setEditor({ mode: "insert", key: null, values: null }) : undefined}
                 onEditRow={
-                  writable
+                  canEditRows
                     ? (target) => setEditor({ mode: "edit", key: target.key, values: target.row })
                     : undefined
                 }

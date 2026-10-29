@@ -94,7 +94,7 @@ describe("buildRowQuery", () => {
     const { engine } = await fixture();
     const query = buildRowQuery(openDatabase(engine), { object: "items", limit: 10 });
     expect(query.sql).toBe(
-      'select rowid as "__paseo_rowid__", "id", "name", "quantity", "price", "note", "payload" from "items" order by "rowid" asc limit 10',
+      'select "rowid" as "__paseo_rowid__", "id", "name", "quantity", "price", "note", "payload" from "items" order by "rowid" asc limit 10',
     );
   });
 

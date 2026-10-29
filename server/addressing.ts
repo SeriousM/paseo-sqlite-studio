@@ -2,20 +2,23 @@ import type { DatabaseSync } from "node:sqlite";
 import type { z } from "zod";
 import type { keyValueSchema, writeValueSchema } from "../shared/contracts";
 import { bindValue, type BindValue } from "../shared/cell-encoding";
-import { hasRowId, primaryKeyColumns, quoteIdentifier } from "./schema";
+import { primaryKeyColumns, quoteIdentifier, rowIdAlias } from "./schema";
 
 type KeyValue = z.infer<typeof keyValueSchema>;
 type WriteValue = z.infer<typeof writeValueSchema>;
 
 /** The WHERE clause that addresses exactly one row. */
 export function addressClause(db: DatabaseSync, object: string, key: readonly KeyValue[]): { sql: string; params: unknown[] } {
-  if (hasRowId(db, object)) {
+  const rowId = rowIdAlias(db, object);
+  if (rowId !== null) {
     if (key.length !== 1) throw new Error("This row is addressed by its rowid, which is missing.");
-    return { sql: "rowid = ?", params: [bindValue(key[0] ?? null)] };
+    return { sql: `${quoteIdentifier(rowId)} = ?`, params: [bindValue(key[0] ?? null)] };
   }
   const primaryKey = primaryKeyColumns(db, object);
   if (primaryKey.length === 0) {
-    throw new Error(`${object} has no primary key, so a single row cannot be addressed.`);
+    throw new Error(
+      `${object} has no primary key and no accessible rowid, so one row cannot be addressed. Editing is not available for this table.`,
+    );
   }
   if (key.length !== primaryKey.length) throw new Error("This row's primary key is incomplete.");
   return {
