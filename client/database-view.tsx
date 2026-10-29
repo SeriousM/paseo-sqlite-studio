@@ -59,6 +59,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<Sort[]>([]);
   const [writable, setWritable] = useState(false);
+  const [writeNotice, setWriteNotice] = useState<string | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -108,11 +109,15 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
         {
           onSuccess: (result) => {
             setWritable(!result.readOnly);
+            setWriteNotice(result.warning);
             if (settings.status !== "ready") return;
             const paths = result.readOnly
               ? settings.values.writablePaths.filter((entry) => entry !== database.path)
               : [...new Set([...settings.values.writablePaths, database.path])];
             void settings.save({ ...settings.values, writablePaths: paths }, settings.revision);
+          },
+          onError: (error) => {
+            setWriteNotice(error instanceof Error ? error.message : String(error));
           },
         },
       );
@@ -268,6 +273,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
               {warning}
             </Text>
           ))}
+          {writeNotice === null ? null : <Text style={styles.badgeWarning}>{writeNotice}</Text>}
         </View>
       </View>
 
