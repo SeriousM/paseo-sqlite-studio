@@ -54,8 +54,9 @@ existing file unless you allow it, and stops with a warning after five million r
 ## Editing rows
 
 Editing is off by default. Enabling it for a database opens the file for writing and asks once per
-path before doing so. With editing on, a row can be inserted, updated, or deleted from the grid;
-changes run immediately against the real file inside a transaction, there is no undo, and other
+path before doing so. With editing on, open a cell and choose Edit row, or click the pencil in the
+row gutter; the form opens on the column you clicked. A row can be inserted, updated, or deleted.
+Changes run immediately against the real file inside a transaction, there is no undo, and other
 programs reading the file see them. Primary keys and row identities are used to target a single row,
 and a statement that matches no row reports that instead of doing nothing quietly. A table with no
 primary key and no accessible rowid cannot be edited, and the grid says so instead of guessing which

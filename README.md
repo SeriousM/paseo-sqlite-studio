@@ -40,7 +40,8 @@ The SQL console:
   string.
 - SQL console with history and saved queries. Export a result as CSV, TSV, JSON, JSONL, Markdown,
   SQL inserts or HTML.
-- Insert, update and delete rows after you enable editing for that database.
+- Insert, update and delete rows after you enable editing for that database. Open a cell and pick
+  Edit row, or click the pencil in the row gutter; the form opens on the column you clicked.
 - Attachment source that puts a table's schema, keys and sample rows into a composer prompt.
 
 ## How it works
@@ -99,7 +100,7 @@ otherwise a freshly published version gets rejected on a clean install.
 
 ## Public now
 
-The repository is public and this is the 1.1.2 release. I built the thing I wanted, so it follows my
+The repository is public and this is the 1.1.3 release. I built the thing I wanted, so it follows my
 own habits first. Bug reports and patches are welcome, keep them to the point.
 
 ## Layout
