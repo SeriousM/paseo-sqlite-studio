@@ -90,9 +90,20 @@ function filterClause(filter: Filter, quotedColumn: string): { sql: string; para
   }
 }
 
-function resolveIdentity(db: DatabaseSync, object: string): Identity | null {
+/**
+ * Projection name for the internal key. A table may declare a column with the
+ * same name, so keep appending until the name is free.
+ */
+function keyAliasFor(columns: readonly Column[]): string {
+  const declared = new Set(columns.map((column) => column.name.toLowerCase()));
+  let alias = ROWID_ALIAS;
+  for (let suffix = 2; declared.has(alias.toLowerCase()); suffix += 1) alias = `${ROWID_ALIAS}_${suffix}`;
+  return alias;
+}
+
+function resolveIdentity(db: DatabaseSync, object: string, columns: readonly Column[]): Identity | null {
   const rowId = rowIdAlias(db, object);
-  if (rowId !== null) return { orderColumns: [rowId], readColumns: [ROWID_ALIAS], rowId };
+  if (rowId !== null) return { orderColumns: [rowId], readColumns: [keyAliasFor(columns)], rowId };
   const primaryKey = primaryKeyColumns(db, object);
   return primaryKey.length > 0 ? { orderColumns: primaryKey, readColumns: primaryKey, rowId: null } : null;
 }
@@ -193,7 +204,7 @@ export function buildOrder(
 
 export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery {
   const detail = describeColumns(db, spec.object);
-  const identity = resolveIdentity(db, spec.object);
+  const identity = resolveIdentity(db, spec.object, detail.columns);
   const { conditions, params } = buildConditions(spec, detail.columns);
 
   const cursor = spec.cursor ?? null;
@@ -212,13 +223,14 @@ export function buildRowQuery(db: DatabaseSync, spec: RowQuerySpec): BuiltQuery 
   const allVisible = detail.columns.filter((column) => column.hidden === "normal").map((column) => column.name);
   const displayNames = requested ?? allVisible;
 
+  const keyAlias = identity?.rowId ? (identity.readColumns[0] ?? ROWID_ALIAS) : null;
   const selection = [...displayNames];
   for (const column of identity?.readColumns ?? []) {
-    if (column !== ROWID_ALIAS && !selection.includes(column)) selection.push(column);
+    if (column !== keyAlias && !selection.includes(column)) selection.push(column);
   }
   const projection = selection.map(quoteIdentifier);
   if (identity?.rowId) {
-    projection.unshift(`${quoteIdentifier(identity.rowId)} as ${quoteIdentifier(ROWID_ALIAS)}`);
+    projection.unshift(`${quoteIdentifier(identity.rowId)} as ${quoteIdentifier(keyAlias ?? ROWID_ALIAS)}`);
   }
 
   // An explicit sort wins; the identity only breaks ties so paging stays stable.

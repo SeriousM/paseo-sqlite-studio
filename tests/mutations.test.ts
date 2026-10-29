@@ -218,6 +218,8 @@ describe("row identity", () => {
                              ('duplicate', 'duplicate', 'duplicate', 'same');
       create table shadowed_key(rowid text, id integer primary key, body text);
       insert into shadowed_key values ('duplicate', 1, 'first'), ('duplicate', 2, 'second');
+      create table collision(__paseo_rowid__ integer, payload blob);
+      insert into collision values (2, x'AA'), (2, x'BB');
     `);
     db.close();
 
@@ -291,5 +293,37 @@ describe("row identity", () => {
     const count = db.prepare("select count(*) as c from tri").get() as { c: number };
     db.close();
     expect(count.c).toBe(2);
+  });
+
+  it("keeps the internal key separate from a user column with the same name", async () => {
+    const { engine, handleId, path } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "collision", limit: 10 });
+    expect(page.keys).toEqual([[1], [2]]);
+
+    expect(deleteRowIn(engine, { handleId, object: "collision", key: page.keys[0]!, expected: null })).toEqual({
+      changes: 1,
+    });
+    const db = new DatabaseSync(path, { readOnly: true });
+    const remaining = db.prepare("select __paseo_rowid__ as marker, hex(payload) as payload from collision").all();
+    db.close();
+    expect(remaining).toEqual([{ marker: 2, payload: "BB" }]);
+  });
+
+  it("updates one row when a user column reuses the internal key name", async () => {
+    const { engine, handleId, path } = await identityFixture();
+    const page = await readRowsOf(engine, { handleId, object: "collision", limit: 10 });
+    expect(
+      updateRowIn(engine, {
+        handleId,
+        object: "collision",
+        key: page.keys[0]!,
+        changes: [{ column: "payload", value: { kind: "blob", base64: "zA==" } }],
+      }),
+    ).toEqual({ changes: 1 });
+
+    const db = new DatabaseSync(path, { readOnly: true });
+    const rows = db.prepare("select hex(payload) as payload from collision order by rowid").all();
+    db.close();
+    expect(rows).toEqual([{ payload: "CC" }, { payload: "BB" }]);
   });
 });
