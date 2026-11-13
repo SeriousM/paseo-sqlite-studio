@@ -1,8 +1,8 @@
 import { useSettings } from "@getpaseo/plugin/client";
 import { Modal } from "@getpaseo/plugin/client/react-native";
-import { useCallback, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { viewerSettings } from "../shared/settings";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Pressable, Text, View, type GestureResponderEvent, type ViewStyle } from "react-native";
+import { viewerSettings, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from "../shared/settings";
 import {
   useObjectDetail,
   useSchema,
@@ -66,6 +66,9 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   const [exportOpen, setExportOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Live sidebar width while the splitter is being dragged; null means "not dragging".
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const dragStart = useRef<{ x: number; width: number } | null>(null);
 
   const schema = useSchema(hostId, handleId);
   const detail = useObjectDetail(hostId, handleId, selected);
@@ -91,6 +94,22 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   }, [settings, selected]);
 
   const activeStatsColumn = statsColumn.length > 0 ? statsColumn : (visibleColumns[0]?.name ?? "");
+
+  const savedSidebarWidth = settings.status === "ready" ? settings.values.sidebarWidth : SIDEBAR_WIDTH_DEFAULT;
+  const treeWidth = dragWidth ?? savedSidebarWidth;
+
+  function splitterWidthAt(event: GestureResponderEvent): number | null {
+    if (dragStart.current === null) return null;
+    const raw = dragStart.current.width + event.nativeEvent.pageX - dragStart.current.x;
+    return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(raw)));
+  }
+
+  function endSplitter(width: number | null) {
+    dragStart.current = null;
+    setDragWidth(null);
+    if (width === null || settings.status !== "ready" || width === settings.values.sidebarWidth) return;
+    void settings.save({ ...settings.values, sidebarWidth: width }, settings.revision);
+  }
 
   function saveWidth(column: string, width: number | null) {
     if (settings.status !== "ready" || selected === null) return;
@@ -181,11 +200,25 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
       },
       body: { flex: 1, flexDirection: "row" as const },
       tree: {
-        width: layout.compact ? undefined : 280,
+        width: layout.compact ? undefined : treeWidth,
+        // Flex items floor at min-content width; without this the tree cannot shrink under its search field.
+        minWidth: 0,
         flex: layout.compact ? 1 : undefined,
         borderRightWidth: layout.compact ? 0 : 1,
         borderRightColor: theme.colors.border,
       },
+      splitter: {
+        width: 6,
+        marginHorizontal: -3,
+        position: "relative" as const,
+        zIndex: 2,
+        backgroundColor: "transparent",
+      },
+      splitterActive: {
+        backgroundColor: theme.colors.accent,
+      },
+      // user-select inherits; applied to the root while dragging so the browser selects nothing under the cursor.
+      noSelect: { userSelect: "none" } as unknown as ViewStyle,
       content: { flex: 1 },
       tabs: {
         flexDirection: "row" as const,
@@ -219,7 +252,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
       consentDanger: { color: theme.colors.statusDanger, fontSize: 13 },
       consentActions: { flexDirection: "row" as const, gap: 8, justifyContent: "flex-end" as const },
     }),
-    [theme, layout.compact],
+    [theme, layout.compact, treeWidth],
   );
 
   const fileName = database.path.split(/[\\/]/).pop() ?? database.path;
@@ -230,7 +263,7 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
   const noRowIdentity = writable && isData && selectedDetail !== null && !selectedDetail.editable;
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, dragWidth !== null ? styles.noSelect : null]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text numberOfLines={1} style={styles.title}>
@@ -303,6 +336,24 @@ export function DatabaseView({ theme, layout, hostId, hostLabel, handleId, datab
             />
           </View>
         ) : null}
+        {layout.compact ? null : (
+          <View
+            accessibilityRole="adjustable"
+            accessibilityLabel="Resize object list"
+            style={[styles.splitter, dragWidth !== null ? styles.splitterActive : null, { cursor: "col-resize" } as unknown as ViewStyle]}
+            onStartShouldSetResponder={() => true}
+            onResponderGrant={(event) => {
+              dragStart.current = { x: event.nativeEvent.pageX, width: treeWidth };
+              setDragWidth(treeWidth);
+            }}
+            onResponderMove={(event) => {
+              const width = splitterWidthAt(event);
+              if (width !== null) setDragWidth(width);
+            }}
+            onResponderRelease={(event) => endSplitter(splitterWidthAt(event))}
+            onResponderTerminate={() => endSplitter(dragWidth)}
+          />
+        )}
         {showContent ? (
           <View style={styles.content}>
             <View style={styles.tabs}>

@@ -90,7 +90,7 @@ export function SchemaTree({ theme, layout, objects, selected, loading, error, o
       },
       search: {
         flex: 1,
-        minWidth: 120,
+        minWidth: 0,
         paddingHorizontal: 10,
         paddingVertical: layout.compact ? 6 : 8,
         borderRadius: 8,
